@@ -1,0 +1,16 @@
+# kb local index (rebuildable via `python -m kb ingest`)
+.kb_index/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.tox/
+# virtualenvs
+.venv/
+venv/
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
