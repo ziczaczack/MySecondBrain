@@ -121,7 +121,7 @@ were indexed.
 Search a previously built index.
 
 ```sh
-python -m kb query <question> [--index-dir DIR] [-k N]
+python -m kb query <question> [--index-dir DIR] [-k N] [--hybrid]
 ```
 
 | Argument / flag | Required | Default     | Description                                          |
@@ -129,9 +129,34 @@ python -m kb query <question> [--index-dir DIR] [-k N]
 | `question`      | yes      | —           | Natural-language query string.                       |
 | `--index-dir`   | no       | `.kb_index` | Index directory to search.                           |
 | `-k`            | no       | `5`         | Number of results to return.                         |
+| `--hybrid`      | no       | off         | Fuse semantic + keyword (BM25) ranking via RRF.      |
 
 If no index exists in the given directory, `query` prints a helpful message
 telling you to run `ingest` first and exits with a non-zero status.
+
+#### Hybrid search
+
+By default `query` ranks notes by pure semantic (embedding/cosine) similarity.
+Passing `--hybrid` additionally runs a lexical **BM25** keyword ranking over the
+same candidates and fuses the two rankings with **Reciprocal Rank Fusion
+(RRF)**. Each result then carries `semantic_score` and `lexical_score` component
+fields alongside the fused `score`.
+
+Reach for `--hybrid` when you want to surface **exact terms, code symbols, or
+function names** that a fuzzy embedding match can miss:
+
+```sh
+python -m kb query "frobnicate_8842 helper" --hybrid
+```
+
+It is **opt-in**: without the flag, search stays pure-semantic and existing
+behavior is unchanged. `--hybrid` composes with the other query flags
+(`--kind`, `--since`, `-k`, `--json`) just like any of them.
+
+> **Caveat:** BM25 helps most for space-delimited tokens and code symbols.
+> Text without word spacing (e.g. CJK) gains little lexically, but the semantic
+> side already covers those queries — so hybrid is never worse than pure
+> semantic, only sometimes better.
 
 ## How it works
 
