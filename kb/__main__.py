@@ -61,6 +61,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Filter results by kind: 'code' or 'note'.",
     )
     query_p.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="Fuse semantic + keyword (BM25) ranking via RRF.",
+    )
+    query_p.add_argument(
         "--json",
         action="store_true",
         help="Output results as JSON.",
@@ -107,6 +112,7 @@ def _run_query(args: argparse.Namespace) -> int:
             k=args.k,
             since=args.since,
             kind=args.kind,
+            hybrid=args.hybrid,
         )
     except FileNotFoundError:
         print(

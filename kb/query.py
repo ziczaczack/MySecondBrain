@@ -6,7 +6,7 @@ import re
 import time
 from datetime import datetime
 
-from . import embedding, store
+from . import embedding, lexical, store
 
 # Default location for the on-disk index. Must match ingest.py and the CLI.
 DEFAULT_INDEX_DIR = ".kb_index"
@@ -82,6 +82,7 @@ def query(
     k: int = 5,
     since: str | None = None,
     kind: str | None = None,
+    hybrid: bool = False,
 ) -> list[dict]:
     """Return the top-``k`` chunks most similar to ``question``.
 
@@ -96,12 +97,18 @@ def query(
             only chunks whose ``kind`` metadata matches are searched. ``None``
             disables filtering. Chunks from old indexes without a ``kind`` key
             are treated as ``"note"``.
+        hybrid: When True, fuse the dense semantic ranking with a lexical
+            BM25 ranking via Reciprocal Rank Fusion (RRF). Hybrid results
+            additionally carry ``"semantic_score"`` and ``"lexical_score"``
+            component fields; ``"score"`` is the fused RRF score. Defaults to
+            False, preserving the pure semantic ranking.
 
     Returns:
         A list of result dicts ``{"filename", "path", "excerpt", "score",
         "start_line", "mtime", "date", "kind"}`` ordered best-first.
         ``excerpt`` is the matched passage; ``mtime``/``date`` describe the
-        source freshness; ``kind`` is ``"note"`` or ``"code"``.
+        source freshness; ``kind`` is ``"note"`` or ``"code"``. Hybrid mode
+        adds ``"semantic_score"`` and ``"lexical_score"`` to each dict.
 
     Raises:
         FileNotFoundError: If no index exists in ``index_dir``.
@@ -133,10 +140,11 @@ def query(
 
     cutoff = _parse_since(since)
 
-    # Build the candidate set by applying since and kind filters together.
+    # Shared candidate set: the original indices that pass the since/kind
+    # filters. With no filters this is the whole corpus, matching the prior
+    # fast path.
     if cutoff is None and kind is None:
-        # No filters: rank the full corpus exactly as before.
-        hits = store.search(query_vec, vectors, k=k)
+        kept = list(range(len(metas)))
     else:
         kept = [
             i
@@ -150,9 +158,22 @@ def query(
             )
             and (kind is None or metas[i].get("kind", "note") == kind)
         ]
-        subset = vectors[kept]
-        local_hits = store.search(query_vec, subset, k=k)
-        hits = [(kept[local_idx], score) for local_idx, score in local_hits]
+
+    # ``hits`` is a list of (original_index, score). ``components`` optionally
+    # maps an original index to its (semantic, lexical) component scores in
+    # hybrid mode. Both ranking paths converge here, then share one loop.
+    components: dict[int, tuple[float, float]] = {}
+
+    if not hybrid:
+        # Pure semantic ranking, byte-identical to the prior behavior.
+        if cutoff is None and kind is None:
+            hits = store.search(query_vec, vectors, k=k)
+        else:
+            subset = vectors[kept]
+            local_hits = store.search(query_vec, subset, k=k)
+            hits = [(kept[local_idx], score) for local_idx, score in local_hits]
+    else:
+        hits = _hybrid_hits(question, query_vec, vectors, metas, kept, k, components)
 
     results: list[dict] = []
     for idx, score in hits:
@@ -164,17 +185,83 @@ def query(
             else ""
         )
         excerpt = _make_excerpt(meta.get("chunk_text", ""))
-        results.append(
-            {
-                "filename": meta.get("filename", ""),
-                "path": meta.get("path", ""),
-                "excerpt": excerpt,
-                "start_line": meta.get("start_line", 1),
-                "score": score,
-                "mtime": mtime,
-                "date": date,
-                "kind": meta.get("kind", "note"),
-                "matched_terms": _matched_terms(question, excerpt),
-            }
-        )
+        result = {
+            "filename": meta.get("filename", ""),
+            "path": meta.get("path", ""),
+            "excerpt": excerpt,
+            "start_line": meta.get("start_line", 1),
+            "score": score,
+            "mtime": mtime,
+            "date": date,
+            "kind": meta.get("kind", "note"),
+            "matched_terms": _matched_terms(question, excerpt),
+        }
+        # Component scores are exposed for hybrid results only; the non-hybrid
+        # dict shape is left exactly as before.
+        if hybrid:
+            semantic, lexical_score = components.get(idx, (0.0, 0.0))
+            result["semantic_score"] = semantic
+            result["lexical_score"] = lexical_score
+        results.append(result)
     return results
+
+
+# RRF rank-offset constant. The standard choice damps the influence of any one
+# ranker top position so neither modality dominates the fusion.
+_RRF_K = 60
+
+
+def _ranks(scores: list[float]) -> list[int]:
+    """Return the 0-based descending rank of each entry by score.
+
+    ``ranks[i]`` is the position of entry ``i`` when entries are sorted by
+    score (highest first), ties broken by index for determinism.
+    """
+    order = sorted(range(len(scores)), key=lambda i: (-scores[i], i))
+    ranks = [0] * len(scores)
+    for position, i in enumerate(order):
+        ranks[i] = position
+    return ranks
+
+
+def _hybrid_hits(
+    question: str,
+    query_vec,
+    vectors,
+    metas: list[dict],
+    kept: list[int],
+    k: int,
+    components: dict[int, tuple[float, float]],
+) -> list[tuple[int, float]]:
+    """Fuse semantic and BM25 rankings over ``kept`` candidates via RRF.
+
+    Populates ``components`` with each returned original index mapped to its
+    ``(semantic_score, lexical_score)`` and returns the top-``k`` hits as
+    ``(original_index, fused_score)`` pairs, best-first.
+    """
+    if not kept or k <= 0:
+        return []
+
+    subset_vectors = vectors[kept]
+    sem = store.cosine_scores(query_vec, subset_vectors)  # aligned to kept
+    docs = [metas[i].get("chunk_text", "") for i in kept]
+    lex = lexical.bm25_scores(question, docs)  # aligned to kept
+
+    sem_rank = _ranks([float(s) for s in sem])
+    lex_rank = _ranks(lex)
+
+    fused = [
+        1.0 / (_RRF_K + sem_rank[local]) + 1.0 / (_RRF_K + lex_rank[local])
+        for local in range(len(kept))
+    ]
+
+    # Top-k local candidates by fused score, ties broken by local index.
+    top_k = min(k, len(kept))
+    order = sorted(range(len(kept)), key=lambda local: (-fused[local], local))
+
+    hits: list[tuple[int, float]] = []
+    for local in order[:top_k]:
+        orig = kept[local]
+        components[orig] = (float(sem[local]), float(lex[local]))
+        hits.append((orig, fused[local]))
+    return hits

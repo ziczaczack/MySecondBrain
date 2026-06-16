@@ -79,6 +79,39 @@ def load(index_dir: str) -> tuple[numpy.ndarray, list[dict]]:
     return vectors, metas
 
 
+def cosine_scores(
+    query_vec: numpy.ndarray, vectors: numpy.ndarray
+) -> numpy.ndarray:
+    """Cosine similarity of ``query_vec`` against every row of ``vectors``.
+
+    Args:
+        query_vec: 1D query vector.
+        vectors: 2D matrix of stored vectors, shape (n_vectors, dim).
+
+    Returns:
+        A 1D float array of length ``len(vectors)``; an empty ``vectors``
+        yields an empty array.
+    """
+    n_vectors = len(vectors)
+    if n_vectors == 0:
+        return numpy.zeros(0)
+
+    # Work in float to avoid integer truncation during normalization.
+    query = numpy.asarray(query_vec, dtype=numpy.float64).ravel()
+    matrix = numpy.asarray(vectors, dtype=numpy.float64)
+
+    # Defensive normalization (rows may or may not already be unit-length).
+    query_norm = numpy.linalg.norm(query)
+    query_unit = query / max(query_norm, _EPSILON)
+
+    matrix_norms = numpy.linalg.norm(matrix, axis=1)
+    matrix_norms = numpy.maximum(matrix_norms, _EPSILON)
+    matrix_unit = matrix / matrix_norms[:, numpy.newaxis]
+
+    # Cosine similarity reduces to a dot product on normalized vectors.
+    return matrix_unit @ query_unit
+
+
 def search(
     query_vec: numpy.ndarray, vectors: numpy.ndarray, k: int = 5
 ) -> list[tuple[int, float]]:
@@ -97,20 +130,8 @@ def search(
     if n_vectors == 0 or k <= 0:
         return []
 
-    # Work in float to avoid integer truncation during normalization.
-    query = numpy.asarray(query_vec, dtype=numpy.float64).ravel()
-    matrix = numpy.asarray(vectors, dtype=numpy.float64)
-
-    # Defensive normalization (rows may or may not already be unit-length).
-    query_norm = numpy.linalg.norm(query)
-    query_unit = query / max(query_norm, _EPSILON)
-
-    matrix_norms = numpy.linalg.norm(matrix, axis=1)
-    matrix_norms = numpy.maximum(matrix_norms, _EPSILON)
-    matrix_unit = matrix / matrix_norms[:, numpy.newaxis]
-
-    # Cosine similarity reduces to a dot product on normalized vectors.
-    scores = matrix_unit @ query_unit
+    # Cosine similarity against every stored vector.
+    scores = cosine_scores(query_vec, vectors)
 
     k = min(k, n_vectors)
 
