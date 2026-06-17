@@ -20,8 +20,9 @@ APIs, no accounts, and no telemetry. Your notes never leave your machine.
   metadata file** (`meta.json`) in a single index directory.
 - Search is **brute-force cosine similarity** over all vectors — there is **no
   FAISS, no sqlite-vec, and no native compilation** to build or install.
-- **One chunk per file**: each note is embedded as a single document. There is no
-  paragraph or section splitting in this version.
+- **Chunked indexing**: each file is split into overlapping ~200-word windows (40
+  words of overlap) and every chunk is embedded as its own vector, so a search
+  matches the specific passage that answers your query rather than a whole file.
 
 ## Quickstart
 
@@ -76,8 +77,9 @@ directory (override with `--index-dir`).
 python -m kb query "Rust 异步运行时"
 ```
 
-The output lists the Top-5 matches, each with a similarity score and the note's
-first non-empty line as a summary. It looks roughly like this:
+The output lists the Top-5 matches, each with a similarity score and an
+`excerpt` — the best-matching chunk passage from the note. It looks roughly like
+this:
 
 ```text
 Top-5 results for: Rust 异步运行时
@@ -160,10 +162,14 @@ behavior is unchanged. `--hybrid` composes with the other query flags
 
 ## How it works
 
-1. **Ingest** (`kb/ingest.py`) walks the source directory recursively, collecting
-   `.md`/`.txt` files in sorted (deterministic) order. Each non-empty file is read
-   as UTF-8 and kept as a single document, along with metadata (path, filename,
-   and a one-line summary taken from its first non-empty line).
+1. **Ingest** (`kb/ingest.py`) is driven by a **`Source`** (`kb/source.py`), the
+   seam that decides where content comes from: a Source yields `Document` objects
+   and the core ingest loop chunks and embeds them without knowing their origin.
+   `FileSource` is today's only concrete source — it walks the directory in sorted
+   (deterministic) order, decodes each file, and supplies the `(mtime, size)`
+   change token used for incremental re-embedding. New origins (APIs, databases,
+   object storage) can be added by implementing the `Source` protocol, with no
+   change to the ingest loop.
 2. **Embedding** (`kb/embedding.py`) runs the texts through `all-MiniLM-L6-v2` on
    CPU, producing L2-normalised float32 vectors.
 3. **Store** (`kb/store.py`) saves the vector matrix to `vectors.npy` and the
@@ -176,8 +182,8 @@ behavior is unchanged. `--hybrid` composes with the other query flags
 
 - Works only with **local `.md`/`.txt` notes** — no PDFs, web pages, or other
   formats, and no cloud sources.
-- **One chunk per file**: long notes are embedded as a single vector, so search
-  matches whole documents rather than specific paragraphs.
+- **Chunked search**: long notes are split into overlapping ~200-word windows, so
+  results point at the specific passage that matched rather than the whole note.
 - Search is **brute force** over all vectors. This is perfectly fine for
   hundreds to thousands of notes; it is not optimised for very large corpora
   (no approximate-nearest-neighbour index).
