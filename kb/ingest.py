@@ -74,7 +74,32 @@ def ingest(
         The number of chunks indexed (a single file may produce several).
     """
     source = FileSource(source_dir)
+    return _ingest_from_source(
+        source, index_dir=index_dir, rebuild=rebuild, label=source_dir
+    )
 
+
+def _ingest_from_source(
+    source,
+    index_dir: str = DEFAULT_INDEX_DIR,
+    rebuild: bool = False,
+    label: str = "the source",
+) -> int:
+    """Index every Document produced by ``source`` into ``index_dir``.
+
+    This is the source-agnostic core of the ingest pipeline: it drives any
+    object satisfying the :class:`~kb.source.Source` protocol through the same
+    incremental diff, classification, embedding, and persistence steps.
+
+    Args:
+        source: Any object satisfying the Source protocol.
+        index_dir: Directory the vector index is written into.
+        rebuild: When True, ignore any existing index and re-embed everything.
+        label: Human-readable origin name for the empty-result message.
+
+    Returns:
+        The number of chunks indexed (a single document may produce several).
+    """
     # --- Load existing index for incremental diffing ---
     old_vectors: numpy.ndarray | None = None
     # key -> list of (row_index_in_old_vectors, meta_dict)
@@ -84,7 +109,7 @@ def ingest(
         try:
             old_vectors, old_metas = store.load(index_dir)
             for i, m in enumerate(old_metas):
-                old_by_key.setdefault(m.get("path", ""), []).append((i, m))
+                old_by_key.setdefault(m.get("key", m.get("path", "")), []).append((i, m))
         except Exception:
             # Missing or corrupt index → start fresh, no crash.
             old_vectors = None
@@ -111,17 +136,22 @@ def ingest(
         old_chunks = old_by_key.get(doc.key, [])
 
         # Reconstruct the stored change token from old meta for comparison.
-        # If 'size' is absent the stored token is treated as missing (safe
-        # full re-embed; no crash on old indexes that predate the size field).
-        if old_chunks and "size" in old_chunks[0][1]:
-            stored_token: tuple | None = (
-                old_chunks[0][1]["mtime"],
-                old_chunks[0][1]["size"],
-            )
-        else:
-            stored_token = None
+        # Source-agnostic: prefer the persisted change_token (any source), fall
+        # back to (mtime, size) for legacy pre-Stage-4 indexes, else treat as
+        # missing (safe full re-embed; no crash on old indexes).
+        stored_token: tuple | None = None
+        if old_chunks:
+            stored = old_chunks[0][1]
+            if "change_token" in stored:
+                stored_token = tuple(stored["change_token"])
+            elif "size" in stored:                       # legacy index (pre-Stage-4)
+                stored_token = (stored["mtime"], stored["size"])
+            else:
+                stored_token = None
 
-        is_unchanged = bool(old_chunks) and stored_token == doc.change_token
+        # doc.change_token coerced to tuple: the stored side round-trips
+        # through json as a list, so compare tuple-to-tuple.
+        is_unchanged = bool(old_chunks) and stored_token == tuple(doc.change_token)
 
         if is_unchanged:
             n_files_unchanged += 1
@@ -139,6 +169,7 @@ def ingest(
 
         for chunk_text, start_line in _chunk_document(content):
             meta = {
+                "key": doc.key,
                 "path": doc.path,
                 "filename": doc.filename,
                 "chunk_text": chunk_text,
@@ -146,6 +177,7 @@ def ingest(
                 "mtime": doc.mtime,
                 "size": doc.size,
                 "kind": doc.kind,
+                "change_token": list(doc.change_token),
             }
             chunk_sources.append(("new", len(new_texts)))
             new_texts.append(chunk_text)
@@ -153,7 +185,7 @@ def ingest(
             final_metas.append(meta)
 
     if not final_metas:
-        print(f"No ingestible files found in '{source_dir}'. Nothing was indexed.")
+        print(f"No ingestible files found in '{label}'. Nothing was indexed.")
         return 0
 
     # --- Embed only the changed/new texts ---

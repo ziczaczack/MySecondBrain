@@ -118,6 +118,34 @@ python -m kb ingest <dir> [--index-dir DIR]
 Empty or whitespace-only files are skipped. On success it prints how many notes
 were indexed.
 
+### `ingest-bookmarks`
+
+Index your browser bookmarks from a Chrome/Edge `Bookmarks` JSON file — the same
+Source pipeline as `ingest`, just a different origin.
+
+```sh
+python -m kb ingest-bookmarks <path-to-Bookmarks> [--index-dir DIR] [--rebuild]
+```
+
+| Argument / flag | Required | Default     | Description                                                  |
+|-----------------|----------|-------------|--------------------------------------------------------------|
+| `path`          | yes      | —           | Path to the Chrome/Edge `Bookmarks` JSON file.               |
+| `--index-dir`   | no       | `.kb_index` | Directory the index is written into (created if missing).    |
+| `--rebuild`     | no       | off         | Ignore any existing index and re-embed everything afresh.    |
+
+The `Bookmarks` file lives alongside your browser profile:
+
+- **Windows:** `%LOCALAPPDATA%\Google\Chrome\User Data\Default\Bookmarks`
+  (Edge: `%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\Bookmarks`)
+- **macOS:** `~/Library/Application Support/Google/Chrome/Default/Bookmarks`
+- **Linux:** `~/.config/google-chrome/Default/Bookmarks`
+
+Chrome may hold a lock on this file while running, so copy it out first and point
+`kb` at the copy.
+
+Each bookmark becomes a **note**-kind document embedding its title, URL, and
+folder path; an incremental re-ingest reuses unchanged bookmarks.
+
 ### `query`
 
 Search a previously built index.
@@ -165,11 +193,12 @@ behavior is unchanged. `--hybrid` composes with the other query flags
 1. **Ingest** (`kb/ingest.py`) is driven by a **`Source`** (`kb/source.py`), the
    seam that decides where content comes from: a Source yields `Document` objects
    and the core ingest loop chunks and embeds them without knowing their origin.
-   `FileSource` is today's only concrete source — it walks the directory in sorted
+   There are now two concrete sources: `FileSource` walks a directory in sorted
    (deterministic) order, decodes each file, and supplies the `(mtime, size)`
-   change token used for incremental re-embedding. New origins (APIs, databases,
-   object storage) can be added by implementing the `Source` protocol, with no
-   change to the ingest loop.
+   change token used for incremental re-embedding, while `BookmarkSource` reads a
+   Chrome/Edge `Bookmarks` JSON file and yields one document per bookmark. Further
+   origins (Firefox via `places.sqlite`, chat-log exports, APIs, databases) can be
+   added by implementing the `Source` protocol, with no change to the ingest loop.
 2. **Embedding** (`kb/embedding.py`) runs the texts through `all-MiniLM-L6-v2` on
    CPU, producing L2-normalised float32 vectors.
 3. **Store** (`kb/store.py`) saves the vector matrix to `vectors.npy` and the
@@ -180,8 +209,9 @@ behavior is unchanged. `--hybrid` composes with the other query flags
 
 ## Scope / limitations
 
-- Works only with **local `.md`/`.txt` notes** — no PDFs, web pages, or other
-  formats, and no cloud sources.
+- Sources are **local `.md`/`.txt` notes** plus **Chrome/Edge browser
+  bookmarks** — no PDFs or other formats, and no cloud sources (Firefox via
+  `places.sqlite` and chat-log exports are still future work).
 - **Chunked search**: long notes are split into overlapping ~200-word windows, so
   results point at the specific passage that matched rather than the whole note.
 - Search is **brute force** over all vectors. This is perfectly fine for

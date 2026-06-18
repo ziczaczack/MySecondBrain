@@ -49,6 +49,7 @@ Here is how a ``NotionSource`` would slot in::
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -261,3 +262,162 @@ class FileSource:
                 )
             except Exception:
                 continue
+
+
+# ---------------------------------------------------------------------------
+# BookmarkSource - Chrome/Edge "Bookmarks" JSON export
+# ---------------------------------------------------------------------------
+
+# WebKit/Chrome epoch offset: seconds between 1601-01-01 and 1970-01-01 (UTC).
+_WEBKIT_EPOCH_OFFSET = 11644473600
+
+# Deterministic order and display labels for the three top-level roots.
+_BOOKMARK_ROOTS = (
+    ("bookmark_bar", "Bookmarks bar"),
+    ("other", "Other bookmarks"),
+    ("synced", "Mobile bookmarks"),
+)
+
+
+def _webkit_to_unix(value):
+    """Convert a Chrome/WebKit timestamp to unix seconds.
+
+    Chrome stores timestamps as a decimal *string* of microseconds since
+    1601-01-01 UTC.  Returns ``0.0`` for missing, empty, zero, or otherwise
+    unparseable values rather than raising.
+    """
+    if not value:
+        return 0.0
+    try:
+        micros = int(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if micros <= 0:
+        return 0.0
+    return micros / 1_000_000 - _WEBKIT_EPOCH_OFFSET
+
+
+class BookmarkSource:
+    """Read a Chrome/Edge ``Bookmarks`` JSON file and yield each bookmark.
+
+    The ``Bookmarks`` file is a pure-JSON tree.  Its top-level ``"roots"``
+    object holds ``"bookmark_bar"``, ``"other"`` and (usually) ``"synced"``,
+    each a *folder* node::
+
+        {"type": "folder", "name": ..., "children": [...]}
+
+    A *url* node - an actual bookmark - looks like::
+
+        {"type": "url", "name": <title>, "url": <url>, "guid": <id>,
+         "date_added": <webkit-microseconds-string>, ...}
+
+    This source walks the three roots in the deterministic order
+    ``bookmark_bar`` -> ``other`` -> ``synced`` (children in file order),
+    collecting every ``type == "url"`` node together with the folder-name
+    path leading to it.  The parsed tree is cached on first use so that
+    :meth:`candidate_keys` and :meth:`documents` together cost a single read.
+
+    Every access is defensive: a missing, unreadable, non-JSON, or
+    ``roots``-less file yields an empty set / empty iterator without raising,
+    mirroring :class:`FileSource`.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+        # Cached list of (url_node, folder_path) tuples; None until walked.
+        self._bookmarks: list[tuple[dict, list[str]]] | None = None
+
+    def _walk(self) -> list[tuple[dict, list[str]]]:
+        """Parse the file once and return ``(url_node, folder_path)`` pairs.
+
+        Returns an empty list - never raises - when the file is missing,
+        unreadable, not valid JSON, or has no ``"roots"`` mapping.
+        """
+        if self._bookmarks is None:
+            collected: list[tuple[dict, list[str]]] = []
+            try:
+                raw = self._path.read_text(encoding="utf-8")
+                data = json.loads(raw)
+                roots = data["roots"]
+            except Exception:
+                self._bookmarks = []
+                return self._bookmarks
+
+            for root_key, root_label in _BOOKMARK_ROOTS:
+                node = roots.get(root_key) if isinstance(roots, dict) else None
+                if isinstance(node, dict):
+                    self._collect(node, [root_label], collected)
+            self._bookmarks = collected
+        return self._bookmarks
+
+    def _collect(
+        self,
+        node: dict,
+        folder_path: list[str],
+        out: list[tuple[dict, list[str]]],
+    ) -> None:
+        """Recursively gather url nodes under *node*, tracking folder names."""
+        node_type = node.get("type")
+        if node_type == "url":
+            out.append((node, folder_path))
+            return
+        if node_type == "folder":
+            children = node.get("children")
+            if isinstance(children, list):
+                for child in children:
+                    if isinstance(child, dict):
+                        self._collect(child, folder_path, out)
+
+    @staticmethod
+    def _key(node: dict) -> str:
+        """Identity key for a url node: prefer ``guid``, else the url."""
+        return node.get("guid") or node.get("url") or ""
+
+    def candidate_keys(self) -> set[str]:
+        """All bookmark identity keys (guid, falling back to url).
+
+        Cheap: parses the file once (cached) and never fetches external
+        content.
+        """
+        keys = {self._key(node) for node, _ in self._walk()}
+        keys.discard("")
+        return keys
+
+    def documents(self) -> Iterator[Document]:
+        """Yield one :class:`Document` per bookmark (url node)."""
+        for node, folder_path in self._walk():
+            title = node.get("name") or ""
+            url = node.get("url") or ""
+            key = self._key(node)
+            if not key:
+                continue
+
+            date_added = node.get("date_added")
+            date_last_used = node.get("date_last_used")
+            since_ts = _webkit_to_unix(date_added)
+            if since_ts == 0.0:
+                since_ts = _webkit_to_unix(date_last_used)
+
+            folder_str = " / ".join(folder_path)
+
+            def _content(_title=title, _url=url, _folder=folder_str):
+                if not _title and not _url:
+                    return None
+                return "\n".join((_title, _url, _folder))
+
+            text = _content()
+            size = len(text.encode("utf-8")) if text else 0
+            filename = title or url
+
+            yield Document(
+                key=key,
+                display_name=title,
+                content=_content,
+                change_token=(date_added, url, title, folder_str),
+                since_ts=since_ts,
+                kind="note",
+                path=url,
+                filename=filename,
+                mtime=since_ts,
+                size=size,
+            )

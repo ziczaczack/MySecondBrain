@@ -35,6 +35,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Ignore any existing index and re-embed everything from scratch.",
     )
 
+    bm_p = sub.add_parser(
+        "ingest-bookmarks",
+        help="Embed and index bookmarks from a Chrome/Edge 'Bookmarks' JSON file.",
+    )
+    bm_p.add_argument("path", help="Path to the Chrome/Edge 'Bookmarks' JSON file.")
+    bm_p.add_argument(
+        "--index-dir",
+        default=DEFAULT_INDEX_DIR,
+        help=f"Where to write the index (default: {DEFAULT_INDEX_DIR}).",
+    )
+    bm_p.add_argument(
+        "--rebuild",
+        action="store_true",
+        default=False,
+        help="Ignore any existing index and re-embed everything from scratch.",
+    )
+
     query_p = sub.add_parser("query", help="Search the index.")
     query_p.add_argument("question", help="Natural-language query string.")
     query_p.add_argument(
@@ -83,6 +100,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _run_ingest(args: argparse.Namespace) -> int:
     ingest(args.dir, index_dir=args.index_dir, rebuild=args.rebuild)
+    return 0
+
+
+def _run_ingest_bookmarks(args: argparse.Namespace) -> int:
+    # Source selection lives in the CLI layer; ingest.py stays source-agnostic.
+    from .source import BookmarkSource
+    from .ingest import _ingest_from_source
+
+    _ingest_from_source(
+        BookmarkSource(args.path),
+        index_dir=args.index_dir,
+        rebuild=args.rebuild,
+        label=args.path,
+    )
     return 0
 
 
@@ -203,6 +234,8 @@ def main() -> None:
 
     if args.command == "ingest":
         sys.exit(_run_ingest(args))
+    elif args.command == "ingest-bookmarks":
+        sys.exit(_run_ingest_bookmarks(args))
     elif args.command == "query":
         sys.exit(_run_query(args))
     elif args.command == "status":

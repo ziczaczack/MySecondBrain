@@ -1,0 +1,19 @@
+{
+  "checksum": "0",
+  "roots": {
+    "bookmark_bar": {
+      "type": "folder", "name": "Bookmarks bar", "date_added": "13350000000000000", "children": [
+        { "type": "url", "name": "Rust async book - Tokio tutorial", "url": "https://tokio.rs/tokio/tutorial", "guid": "guid-rust-001", "date_added": "13350000000000001" },
+        { "type": "folder", "name": "Cooking", "date_added": "13350000000000002", "children": [
+          { "type": "url", "name": "Classic sourdough bread recipe", "url": "https://example.com/sourdough", "guid": "guid-sour-002", "date_added": "13350000000000003" }
+        ]}
+      ]
+    },
+    "other": {
+      "type": "folder", "name": "Other bookmarks", "date_added": "13350000000000004", "children": [
+        { "type": "url", "name": "Postgres index tuning guide", "url": "https://example.com/postgres-indexes", "guid": "guid-pg-003", "date_added": "13350000000000005" }
+      ]
+    }
+  },
+  "version": 1
+}
