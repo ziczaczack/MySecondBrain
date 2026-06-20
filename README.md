@@ -61,27 +61,33 @@ This runs the acceptance test (`tests/test_query.py`), which ingests the sample
 notes in `fixtures/` and proves that the Rust-async note ranks **#1** for the
 query `"Rust 异步运行时"` (verifying cross-lingual semantic search works).
 
-### 4. Ingest your notes
+### 4. Add a folder and ask
+
+`kb` is **zero-config**: you never have to name or manage an index path. Just
+register a folder and ask questions of your **managed knowledge base**.
 
 ```sh
-python -m kb ingest fixtures
+python -m kb add <folder>          # register a notes/code folder and index it
+python -m kb ask "your question"   # ask the managed knowledge base
 ```
 
-This walks the directory recursively, embeds every `.md`/`.txt` file, and writes
-the index. By default the index is written to **`.kb_index`** in the current
-directory (override with `--index-dir`).
+`add` registers the folder as a **source** and indexes it in one step; `ask`
+searches the managed knowledge base. Neither command needs an index path — the
+index lives in a per-user managed home (see *Where your data lives* below).
 
-### 5. Query
+List what you have registered, and keep it fresh automatically:
 
 ```sh
-python -m kb query "Rust 异步运行时"
+python -m kb sources               # list registered sources
+python -m kb watch                 # auto-reindex registered folders on change
 ```
 
-The output lists the Top-5 matches, each with a similarity score and an
-`excerpt` — the best-matching chunk passage from the note. It looks roughly like
-this:
+`ask` prints the Top-5 matches, each with a similarity score and an `excerpt` —
+the best-matching chunk passage from the note. It looks roughly like this:
 
 ```text
+python -m kb ask "Rust 异步运行时"
+
 Top-5 results for: Rust 异步运行时
 1. rust-async.md   (0.5xxx)
    # Rust Async Runtime: Tokio Deep Dive
@@ -102,6 +108,70 @@ matters — `rust-async.md` comes first.)
 
 All commands are invoked as `python -m kb <subcommand>`.
 
+### `add`
+
+Register a folder (or a bookmarks file) as a **source** and index it in one step
+— the primary, zero-config way to load content. No index path required.
+
+```sh
+python -m kb add <folder> [--bookmarks]
+```
+
+| Argument / flag | Required | Default                | Description                                                        |
+|-----------------|----------|------------------------|--------------------------------------------------------------------|
+| `path`          | yes      | —                      | Folder of notes/code, or a Chrome/Edge `Bookmarks` file with `--bookmarks`. |
+| `--bookmarks`   | no       | off                    | Treat `<path>` as a Chrome/Edge `Bookmarks` JSON file.             |
+| `--index-dir`   | no       | managed knowledge base | Override the managed index location (advanced/multi-corpus).        |
+
+The source is recorded in the registry (`python -m kb sources`) so `watch` can
+re-index it later.
+
+### `ask`
+
+Ask the managed knowledge base a natural-language question — a friendly alias
+for `query` against the managed index, with the same flags.
+
+```sh
+python -m kb ask <question> [-k N] [--since WINDOW] [--kind code|note] [--hybrid] [--json]
+```
+
+| Argument / flag | Required | Default                | Description                                          |
+|-----------------|----------|------------------------|------------------------------------------------------|
+| `question`      | yes      | —                      | Natural-language query string.                       |
+| `-k`            | no       | `5`                    | Number of results to return.                         |
+| `--since`       | no       | —                      | Only results within a window, e.g. `7d`, `30d`, or `YYYY-MM-DD`. |
+| `--kind`        | no       | —                      | Filter by kind: `code` or `note`.                    |
+| `--hybrid`      | no       | off                    | Fuse semantic + keyword (BM25) ranking via RRF.      |
+| `--json`        | no       | off                    | Output results as JSON.                              |
+| `--index-dir`   | no       | managed knowledge base | Search a different index (advanced/multi-corpus).    |
+
+### `sources`
+
+List the sources you have registered with `add`.
+
+```sh
+python -m kb sources
+```
+
+Prints one line per source (its kind and path). With nothing registered yet, it
+tells you to add one with `python -m kb add <folder>`.
+
+### `watch`
+
+Watch your registered folders and **auto-reindex on change**, so the managed
+knowledge base stays current without re-running `add`.
+
+```sh
+python -m kb watch [--interval N]
+```
+
+| Argument / flag | Required | Default                | Description                                                |
+|-----------------|----------|------------------------|------------------------------------------------------------|
+| `--interval`    | no       | `3`                    | Polling interval in seconds.                               |
+| `--index-dir`   | no       | managed knowledge base | Override the managed index location (advanced).            |
+
+Runs until interrupted (Ctrl-C).
+
 ### `ingest`
 
 Embed and index a directory of `.md`/`.txt` notes.
@@ -110,10 +180,15 @@ Embed and index a directory of `.md`/`.txt` notes.
 python -m kb ingest <dir> [--index-dir DIR]
 ```
 
-| Argument / flag | Required | Default     | Description                                              |
-|-----------------|----------|-------------|----------------------------------------------------------|
-| `dir`           | yes      | —           | Directory to walk **recursively** for `.md`/`.txt` notes. |
-| `--index-dir`   | no       | `.kb_index` | Directory the index is written into (created if missing). |
+| Argument / flag | Required | Default                | Description                                              |
+|-----------------|----------|------------------------|----------------------------------------------------------|
+| `dir`           | yes      | —                      | Directory to walk **recursively** for `.md`/`.txt` notes. |
+| `--index-dir`   | no       | managed knowledge base | Directory the index is written into (created if missing). |
+
+`--index-dir` now defaults to the **managed knowledge base** (not `.kb_index`).
+Pass an explicit `--index-dir` only for the advanced/multi-corpus path where you
+want a separate, self-contained index. For the everyday workflow prefer
+`add` + `ask`.
 
 Empty or whitespace-only files are skipped. On success it prints how many notes
 were indexed.
@@ -127,11 +202,15 @@ Source pipeline as `ingest`, just a different origin.
 python -m kb ingest-bookmarks <path-to-Bookmarks> [--index-dir DIR] [--rebuild]
 ```
 
-| Argument / flag | Required | Default     | Description                                                  |
-|-----------------|----------|-------------|--------------------------------------------------------------|
-| `path`          | yes      | —           | Path to the Chrome/Edge `Bookmarks` JSON file.               |
-| `--index-dir`   | no       | `.kb_index` | Directory the index is written into (created if missing).    |
-| `--rebuild`     | no       | off         | Ignore any existing index and re-embed everything afresh.    |
+| Argument / flag | Required | Default                | Description                                                  |
+|-----------------|----------|------------------------|--------------------------------------------------------------|
+| `path`          | yes      | —                      | Path to the Chrome/Edge `Bookmarks` JSON file.               |
+| `--index-dir`   | no       | managed knowledge base | Directory the index is written into (created if missing).    |
+| `--rebuild`     | no       | off                    | Ignore any existing index and re-embed everything afresh.    |
+
+For the simple path, `python -m kb add <Bookmarks> --bookmarks` registers and
+indexes bookmarks in one step; `--index-dir` is the advanced/multi-corpus
+override.
 
 The `Bookmarks` file lives alongside your browser profile:
 
@@ -154,12 +233,16 @@ Search a previously built index.
 python -m kb query <question> [--index-dir DIR] [-k N] [--hybrid]
 ```
 
-| Argument / flag | Required | Default     | Description                                          |
-|-----------------|----------|-------------|------------------------------------------------------|
-| `question`      | yes      | —           | Natural-language query string.                       |
-| `--index-dir`   | no       | `.kb_index` | Index directory to search.                           |
-| `-k`            | no       | `5`         | Number of results to return.                         |
-| `--hybrid`      | no       | off         | Fuse semantic + keyword (BM25) ranking via RRF.      |
+| Argument / flag | Required | Default                | Description                                          |
+|-----------------|----------|------------------------|------------------------------------------------------|
+| `question`      | yes      | —                      | Natural-language query string.                       |
+| `--index-dir`   | no       | managed knowledge base | Index directory to search.                           |
+| `-k`            | no       | `5`                    | Number of results to return.                         |
+| `--hybrid`      | no       | off                    | Fuse semantic + keyword (BM25) ranking via RRF.      |
+
+`--index-dir` defaults to the **managed knowledge base** (not `.kb_index`); pass
+it explicitly only for the advanced/multi-corpus path. For the everyday workflow,
+`ask` is the friendly equivalent of `query` against the managed index.
 
 If no index exists in the given directory, `query` prints a helpful message
 telling you to run `ingest` first and exits with a non-zero status.
@@ -187,6 +270,21 @@ behavior is unchanged. `--hybrid` composes with the other query flags
 > Text without word spacing (e.g. CJK) gains little lexically, but the semantic
 > side already covers those queries — so hybrid is never worse than pure
 > semantic, only sometimes better.
+
+## Where your data lives
+
+`kb` keeps your index and source registry in a single **managed home**
+directory, so you never have to track an index path. The location is per-OS:
+
+- **Windows:** `%APPDATA%\kb`
+- **macOS:** `~/Library/Application Support/kb`
+- **Linux:** `$XDG_DATA_HOME/kb` if set, else `~/.local/share/kb`
+
+Inside the home live the vector index (`<home>/index`) and the JSON source
+registry (`<home>/sources.json`, written by `add` and read by `sources` and
+`watch`). Set the **`KB_HOME`** environment variable to override the home
+directory (handy for tests, throwaway corpora, or keeping the data on another
+drive).
 
 ## How it works
 
