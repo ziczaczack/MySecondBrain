@@ -596,3 +596,76 @@ def test_hybrid_surfaces_rare_token(tmp_path):
         assert "semantic_score" not in r and "lexical_score" not in r, (
             f"non-hybrid result leaked hybrid component keys: {sorted(r.keys())}"
         )
+
+
+def test_cjk_note_splits_into_multiple_chunks(tmp_path):
+    """A long space-free Chinese note is tokenised at character granularity and split.
+
+    Without the CJK tokenizer each character would be swallowed into a single
+    ``\\S+`` token, the whole note would be one chunk, and count would equal 1.
+    With the CJK tokenizer each character is an individual token, so a 500+
+    character note must produce strictly more than one chunk.
+    """
+    docs = tmp_path / "docs"
+    docs.mkdir()
+
+    # ~40-char unit, repeated to produce a ~520-char single-line note with no
+    # whitespace — only the CJK character tokenizer can split it.
+    unit = "人工智能与机器学习是现代计算机科学的重要分支深度学习模型通过大量数据训练识别"
+    note_text = unit * 13  # ≈ 520 CJK characters > 2 × _CHUNK_WORDS (200)
+    (docs / "cjk-long.md").write_text(note_text, encoding="utf-8")
+
+    index_dir = str(tmp_path / "idx")
+    count = ingest(str(docs), index_dir=index_dir)
+    assert count > 1, (
+        f"Expected long CJK note to produce >1 chunk, got {count}. "
+        "Verify that _WORD_RE treats each CJK character as a separate token."
+    )
+
+
+def test_cjk_query_excerpt_is_bounded(tmp_path):
+    """A Chinese query returns the matching chunk's excerpt — not the whole note.
+
+    The note has two semantically distinct halves on a single line with no
+    spaces: a historical/archaeological section followed by a dense quantum-
+    computing section.  The second half contains the queried phrase many times
+    and is semantically very different from the first half, so the embedding
+    model reliably prefers a chunk from the quantum section.  The test asserts
+    (a) the excerpt carries the phrase and (b) it is length-bounded, confirming
+    that a sub-document chunk was retrieved, not the full file.
+    """
+    docs = tmp_path / "docs"
+    docs.mkdir()
+
+    target_phrase = "量子计算突破"
+    # Historical filler — semantically unrelated to quantum computing.
+    # 31 chars × 7 = 217 chars (tokens 0-216).
+    hist = "古代历史文物考古发掘人类文明演变传统文化遗产博物馆展览研究考察"
+    # Quantum section — dense, on-topic, contains target_phrase at every cycle.
+    # 29 chars × 7 = 203 chars (tokens 217-419).
+    quantum = "量子计算突破性进展量子纠缠量子叠加态量子门量子比特量子算法"
+    note_text = hist * 7 + quantum * 7  # 420 chars, no spaces, single line
+    (docs / "cjk-query.md").write_text(note_text, encoding="utf-8")
+
+    index_dir = str(tmp_path / "idx")
+    count = ingest(str(docs), index_dir=index_dir)
+    assert count > 1, f"Expected >1 chunk from long CJK note, got {count}"
+
+    results = query(target_phrase, index_dir=index_dir, k=5)
+    assert results, f"Expected at least one result querying {target_phrase!r}"
+
+    top = results[0]
+    assert top["filename"] == "cjk-query.md", (
+        f"Expected cjk-query.md as top result, got {top['filename']!r}"
+    )
+
+    excerpt = top["excerpt"]
+    # The retrieved excerpt must contain the distinctive queried phrase.
+    assert target_phrase in excerpt, (
+        f"Top excerpt does not contain the queried phrase {target_phrase!r}:\n{excerpt!r}"
+    )
+    # The excerpt must be a bounded sub-document slice, not the entire note.
+    assert len(excerpt) < len(note_text), (
+        f"Excerpt length ({len(excerpt)}) equals the whole note ({len(note_text)} chars); "
+        "chunking did not produce a bounded passage."
+    )

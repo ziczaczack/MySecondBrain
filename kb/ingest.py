@@ -17,8 +17,20 @@ DEFAULT_INDEX_DIR = ".kb_index"
 _CHUNK_WORDS = 200
 _CHUNK_OVERLAP = 40
 
-# A "word" is any run of non-whitespace characters.
-_WORD_RE = re.compile(r"\S+")
+# CJK Unicode ranges treated as single-character tokens so that Chinese,
+# Japanese, and Korean text chunks at character granularity rather than
+# swallowing whole sentences into one "word".
+_CJK_CHARS = (
+    r"一-鿿"   # CJK Unified Ideographs
+    r"㐀-䶿"   # CJK Extension A
+    r"豈-﫿"   # CJK Compatibility Ideographs
+    r"぀-ゟ"   # Hiragana
+    r"゠-ヿ"   # Katakana
+    r"가-힯"   # Hangul Syllables
+)
+# Each CJK character is one token; a run of non-whitespace non-CJK chars is
+# one token (identical to the previous \S+ behaviour for pure-ASCII text).
+_WORD_RE = re.compile(rf"[{_CJK_CHARS}]|[^\s{_CJK_CHARS}]+")
 
 
 def _chunk_document(content: str) -> list[tuple[str, int]]:
