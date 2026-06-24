@@ -9,6 +9,7 @@ import sys
 
 from . import config
 from .ingest import DEFAULT_INDEX_DIR, ingest
+from .llm import KbLLMError
 from .query import IncompatibleIndexError, query
 from .status import status as status_fn
 
@@ -75,9 +76,14 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_query_args(query_p)
 
     ask_p = sub.add_parser(
-        "ask", help="Search the managed knowledge base (friendly alias for query)."
+        "ask", help="Ask a question; answer is synthesized by an LLM with citations."
     )
     _add_query_args(ask_p)
+    ask_p.add_argument(
+        "--no-synthesis",
+        action="store_true",
+        help="Skip LLM synthesis and return raw retrieval results (same as query).",
+    )
 
     sub.add_parser("sources", help="List registered sources.")
 
@@ -225,6 +231,57 @@ def _highlight(excerpt: str, terms: list[str]) -> str:
     return highlighted
 
 
+def _run_ask(args: argparse.Namespace) -> int:
+    if getattr(args, "no_synthesis", False):
+        return _run_query(args)
+
+    from .answer import answer
+
+    index_dir = _resolve_index_dir(args.index_dir)
+    try:
+        result = answer(
+            args.question,
+            index_dir=index_dir,
+            k=args.k,
+            since=args.since,
+            kind=args.kind,
+            hybrid=args.hybrid,
+        )
+    except FileNotFoundError:
+        print(
+            f"No index found in '{index_dir}'. "
+            "Run `python -m kb ingest <dir>` first to build the index.",
+            file=sys.stderr,
+        )
+        return 1
+    except IncompatibleIndexError as err:
+        print(str(err), file=sys.stderr)
+        return 1
+    except KbLLMError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "answer": result["answer"],
+                    "citations": result["citations"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    print(result["answer"])
+    if result["citations"]:
+        print("\nSources:")
+        for c in result["citations"]:
+            print(f"  [{c['n']}] {c['filename']}:{c['start_line']}")
+    return 0
+
+
 def _run_query(args: argparse.Namespace) -> int:
     index_dir = _resolve_index_dir(args.index_dir)
     try:
@@ -333,7 +390,7 @@ def main() -> None:
     elif args.command == "query":
         sys.exit(_run_query(args))
     elif args.command == "ask":
-        sys.exit(_run_query(args))
+        sys.exit(_run_ask(args))
     elif args.command == "sources":
         sys.exit(_run_sources(args))
     elif args.command == "watch":

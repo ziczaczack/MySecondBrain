@@ -1,13 +1,16 @@
-r"""Managed per-user configuration: home directory, index location, and a JSON
-source registry.
+r"""Managed per-user configuration: home directory, index location, a JSON
+source registry, and synthesis-model resolution.
 
 This module is the foundation that lets the ``kb`` CLI become zero-config.  It
-owns three pieces of policy, all derived from a single managed *home* directory:
+owns four pieces of policy, all derived from a single managed *home* directory:
 
 * :func:`kb_home`            -- the per-user config/data root, platform-aware.
 * :func:`default_index_dir`  -- where the vector index lives by default.
 * a small JSON *source registry* (``sources.json`` under the home) recording
   which origins the user has registered for ingest.
+* :func:`synthesis_model`    -- the Claude model used for answer synthesis.
+* :func:`api_key_source`     -- reports where the API key comes from (never
+  writes or returns the key itself).
 
 Home-directory resolution (queryable, never side-effecting)
 -----------------------------------------------------------
@@ -36,6 +39,22 @@ Source registry shape
 :class:`~kb.source.Source` adapters).  Every read is defensive: a missing,
 unreadable, non-JSON, or non-list registry yields ``[]`` rather than raising,
 mirroring the posture of :class:`~kb.source.FileSource` and the ingest loop.
+
+Model resolution (queryable, never side-effecting)
+--------------------------------------------------
+:func:`synthesis_model` is pure like :func:`kb_home`.  Resolution order:
+
+1. ``$KB_MODEL`` if set and non-empty.
+2. ``"model"`` key in ``<kb_home>/config.json`` if the file exists and is valid
+   JSON (other keys in that file are ignored).
+3. Built-in default: ``"claude-opus-4-8"``.
+
+API key handling
+----------------
+The Anthropic API key is **never written to disk**.  :func:`api_key_source`
+returns a human-readable label (e.g. ``"env:ANTHROPIC_API_KEY"`` or
+``"not configured"``) so callers can surface where the key comes from without
+exposing the secret value.  The key itself stays in the environment.
 """
 
 from __future__ import annotations
@@ -47,6 +66,12 @@ from pathlib import Path
 
 # Allowed values for a registered source's "kind" field.
 _VALID_KINDS = {"files", "bookmarks"}
+
+# Built-in default synthesis model.  Overridable via $KB_MODEL or config.json.
+_DEFAULT_MODEL = "claude-opus-4-8"
+
+# Environment variable and config-file key checked for API key presence.
+_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 
 def kb_home() -> Path:
@@ -80,6 +105,46 @@ def kb_home() -> Path:
 def default_index_dir() -> str:
     """Return the default on-disk index location, ``<kb_home>/index`` as a str."""
     return str(kb_home() / "index")
+
+
+def synthesis_model() -> str:
+    """Return the Claude model to use for answer synthesis (never side-effecting).
+
+    Resolution order:
+
+    1. ``$KB_MODEL`` env var if set and non-empty.
+    2. ``"model"`` key in ``<kb_home>/config.json`` if readable and valid JSON.
+    3. Built-in default ``"claude-opus-4-8"``.
+    """
+    env_val = os.environ.get("KB_MODEL")
+    if env_val:
+        return env_val
+
+    cfg_path = kb_home() / "config.json"
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("model"), str) and data["model"]:
+            return data["model"]
+    except Exception:
+        pass
+
+    return _DEFAULT_MODEL
+
+
+def api_key_source() -> str:
+    """Return a label describing where the Anthropic API key comes from.
+
+    Returns one of:
+
+    * ``"env:ANTHROPIC_API_KEY"`` -- the standard env var is populated.
+    * ``"not configured"``        -- no key found.
+
+    The key value is never read or returned by this function; it stays in
+    the environment and is never written to disk.
+    """
+    if os.environ.get(_API_KEY_ENV):
+        return f"env:{_API_KEY_ENV}"
+    return "not configured"
 
 
 def sources_path() -> Path:

@@ -190,7 +190,9 @@ def test_cli_add_ask_sources_subprocess(tmp_path):
         f"expected a '[files]' entry after add, got: {p_list.stdout!r}"
     )
 
-    p_ask = run(["ask", "Rust 异步运行时"])
+    # Use --no-synthesis so the CLI smoke test has no network dependency.
+    # Synthesis (LLM integration) is tested separately with a mock provider.
+    p_ask = run(["ask", "--no-synthesis", "Rust 异步运行时"])
     assert p_ask.returncode == 0, (
         f"ask failed (rc={p_ask.returncode})\n"
         f"STDOUT: {p_ask.stdout}\nSTDERR: {p_ask.stderr}"
@@ -198,3 +200,12 @@ def test_cli_add_ask_sources_subprocess(tmp_path):
     assert "rust" in p_ask.stdout.lower(), (
         f"expected a Rust hit in ask output, got: {p_ask.stdout!r}"
     )
+
+    p_ask_json = run(["ask", "--no-synthesis", "--json", "Rust 异步运行时"])
+    assert p_ask_json.returncode == 0, (
+        f"ask --json failed (rc={p_ask_json.returncode})\n"
+        f"STDOUT: {p_ask_json.stdout}\nSTDERR: {p_ask_json.stderr}"
+    )
+    import json as _json
+    payload = _json.loads(p_ask_json.stdout)
+    assert isinstance(payload, list), f"expected a JSON list, got: {type(payload)}"
