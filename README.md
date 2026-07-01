@@ -35,6 +35,56 @@ python -m kb query "postgres index types"
 python -m kb ask "how do partial indexes work in postgres?"
 ```
 
+## Daily workflow
+
+After `pip install -e .`, the `kb` command lives in your Python environment's
+scripts directory (e.g. `.venv/Scripts/kb` on Windows, `.venv/bin/kb` on
+macOS/Linux). Activate the environment — or add that directory to your `PATH` —
+so you can call `kb` directly. Everything below also works as `python -m kb …`.
+
+**1. Build your library once.** Prefer `add` over a bare `ingest`: `add`
+*registers* the folder as a source, so you can re-index or `watch` it later with
+no arguments. The first run downloads the embedding model (a few hundred MB,
+one time), then embeds every note.
+
+```sh
+kb add ~/notes            # register + index a folder
+kb add ~/code/my-project  # add as many sources as you like
+kb sources                # list what's registered
+kb status                 # how many chunks are indexed
+```
+
+**2. Search — pure-local, no network.**
+
+```sh
+kb query "voice-to-text desktop app"
+kb query "Polymarket trading bot" --hybrid   # add --hybrid for keyword/proper-noun queries
+kb query "multi-agent" -k 8 --kind note      # more hits, notes only
+```
+
+`--hybrid` is opt-in: it helps queries that hinge on a distinctive exact token,
+but plain semantic search is the safe default for conceptual questions.
+
+**3. Ask — the only step that hits the network** (see setup below).
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...
+kb ask "what was my plan for auto-editing videos?"
+kb ask "..." --no-synthesis   # skip the LLM; return raw passages like `kb query`
+```
+
+**4. Keep the index fresh.** Re-running `add` on a registered source is
+incremental — only changed files are re-embedded:
+
+```sh
+kb add ~/notes   # incremental refresh
+kb watch         # or leave this running to auto-reindex on change (Ctrl+C to stop)
+```
+
+> **Switching embedding models?** The model that built an index is stamped into
+> it, and `kb query`/`kb ask` refuse to search across a mismatch. After changing
+> `KB_EMBED_MODEL`, rebuild once: `kb ingest <dir> --rebuild`.
+
 ## Commands
 
 | Command            | What it does                                                        |
