@@ -117,11 +117,27 @@ def _ingest_from_source(
     # key -> list of (row_index_in_old_vectors, meta_dict)
     old_by_key: dict[str, list[tuple[int, dict]]] = {}
 
+    model = embedding.current_model_name()
+
     if not rebuild:
         try:
             old_vectors, old_metas = store.load(index_dir)
-            for i, m in enumerate(old_metas):
-                old_by_key.setdefault(m.get("key", m.get("path", "")), []).append((i, m))
+            # An index built with a different embedding model cannot have its
+            # vectors reused -- they live in a different space. Drop it and
+            # re-embed everything under the current model.
+            old_model = (
+                old_metas[0].get("embed_model", embedding.LEGACY_MODEL)
+                if old_metas
+                else model
+            )
+            if old_model != model:
+                old_vectors = None
+                old_by_key = {}
+            else:
+                for i, m in enumerate(old_metas):
+                    old_by_key.setdefault(
+                        m.get("key", m.get("path", "")), []
+                    ).append((i, m))
         except Exception:
             # Missing or corrupt index → start fresh, no crash.
             old_vectors = None
@@ -190,6 +206,7 @@ def _ingest_from_source(
                 "size": doc.size,
                 "kind": doc.kind,
                 "change_token": list(doc.change_token),
+                "embed_model": model,
             }
             chunk_sources.append(("new", len(new_texts)))
             new_texts.append(chunk_text)

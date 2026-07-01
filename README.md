@@ -6,15 +6,21 @@ a cited, natural-language answer from the passages it retrieves.
 
 ## Install
 
-```sh
-pip install -r requirements.txt
-```
-
-The synthesis step (`kb ask`) additionally needs the Anthropic SDK:
+Install the package to get a `kb` command on your PATH:
 
 ```sh
-pip install anthropic
+pip install -e .
 ```
+
+Optional features are pulled in as extras:
+
+```sh
+pip install -e ".[documents]"   # also index PDF and .docx files
+pip install -e ".[synthesis]"   # enable `kb ask` (Anthropic SDK)
+pip install -e ".[dev]"         # run the test suite
+```
+
+Every command below can be run either as `kb <cmd>` or `python -m kb <cmd>`.
 
 ## Quick start
 
@@ -33,7 +39,7 @@ python -m kb ask "how do partial indexes work in postgres?"
 
 | Command            | What it does                                                        |
 | ------------------ | ------------------------------------------------------------------ |
-| `ingest <dir>`     | Embed and index a directory of `.md`/`.txt`/`.py`/`.js` files.      |
+| `ingest <dir>`     | Embed and index a directory of notes, code, and (with `[documents]`) PDF/`.docx` files. |
 | `ingest-bookmarks` | Index bookmarks from a Chrome/Edge `Bookmarks` JSON file.          |
 | `add <path>`       | Register a folder (or `--bookmarks` file) as a source and index it.|
 | `query "<q>"`      | Search the index. Pure-local retrieval, no API call.               |
@@ -130,6 +136,29 @@ The synthesis model defaults to `claude-opus-4-8`. Override it with the
 
 ```sh
 export KB_MODEL=claude-opus-4-8
+```
+
+## Embedding model
+
+Retrieval embeds locally with a **multilingual** model
+(`paraphrase-multilingual-MiniLM-L12-v2`) so Chinese/Japanese/Korean notes land
+in the same vector space as English ones. Both the dense and the `--hybrid`
+(BM25) paths are CJK-aware: CJK text is segmented at character granularity for
+embedding and into 2-character shingles for keyword matching.
+
+Override the model with `KB_EMBED_MODEL` (e.g. the smaller English-only
+`all-MiniLM-L6-v2`):
+
+```sh
+export KB_EMBED_MODEL=all-MiniLM-L6-v2
+```
+
+The model that built an index is stamped into it. Switching models requires a
+re-ingest — `kb query`/`kb ask` refuse to search an index built with a
+different model rather than return garbage. Rebuild with:
+
+```sh
+python -m kb ingest <dir> --rebuild
 ```
 
 ## Privacy

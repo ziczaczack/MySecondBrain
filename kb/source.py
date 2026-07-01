@@ -91,10 +91,48 @@ _IGNORE_DIRS = {
 
 # Files larger than this are skipped (avoids embedding megabyte blobs).
 _MAX_FILE_BYTES = 1 * 1024 * 1024  # 1 MB
+# Binary documents (PDF/.docx) carry far less text per byte than plain text, so
+# allow a larger raw size before extraction.
+_MAX_DOC_BYTES = 25 * 1024 * 1024  # 25 MB
+
+
+# Binary document formats indexed by extracting their text. Always notes.
+_DOC_SUFFIXES = {".pdf", ".docx"}
+
+# Every suffix the file walk will pick up.
+_INDEXABLE_SUFFIXES = _TEXT_SUFFIXES | _DOC_SUFFIXES
 
 
 def _kind(suffix: str) -> str:
     return "code" if suffix.lower() in _CODE_SUFFIXES else "note"
+
+
+def _extract_pdf(p: Path) -> str | None:
+    """Extract text from a PDF, or ``None`` if unreadable or pypdf is absent."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return None
+    try:
+        reader = PdfReader(str(p))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        return None
+    return text if text.strip() else None
+
+
+def _extract_docx(p: Path) -> str | None:
+    """Extract text from a .docx, or ``None`` if unreadable or python-docx is absent."""
+    try:
+        from docx import Document as _Docx
+    except ImportError:
+        return None
+    try:
+        doc = _Docx(str(p))
+        text = "\n".join(par.text for par in doc.paragraphs)
+    except Exception:
+        return None
+    return text if text.strip() else None
 
 
 def _load_file(p: Path) -> str | None:
@@ -107,6 +145,13 @@ def _load_file(p: Path) -> str | None:
     3. NUL byte present (and no BOM) → real binary, skip.
     4. Plain UTF-8 with ``errors='replace'``.
     """
+    # Binary document formats need format-specific extraction, not byte decoding.
+    suffix = p.suffix.lower()
+    if suffix == ".pdf":
+        return _extract_pdf(p)
+    if suffix == ".docx":
+        return _extract_docx(p)
+
     try:
         raw = p.read_bytes()
     except Exception:
@@ -229,7 +274,7 @@ class FileSource:
                 dirnames[:] = sorted(d for d in dirnames if d not in _IGNORE_DIRS)
                 for name in filenames:
                     p = Path(dirpath) / name
-                    if p.suffix.lower() in _TEXT_SUFFIXES:
+                    if p.suffix.lower() in _INDEXABLE_SUFFIXES:
                         collected.append(p)
             self._paths = sorted(collected)
         return self._paths
@@ -243,7 +288,12 @@ class FileSource:
         for p in self._walk():
             try:
                 stat = os.stat(p)
-                if stat.st_size > _MAX_FILE_BYTES:
+                max_bytes = (
+                    _MAX_DOC_BYTES
+                    if p.suffix.lower() in _DOC_SUFFIXES
+                    else _MAX_FILE_BYTES
+                )
+                if stat.st_size > max_bytes:
                     continue
                 mtime = stat.st_mtime
                 size = stat.st_size

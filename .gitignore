@@ -7,6 +7,15 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .tox/
+*.egg-info/
+# stray pytest run logs and ad-hoc index/data scratch dirs
+pytest_out.txt
+_pytest_out.txt
+_pytest_out.log
+test_data/
+test_data_verify/
+test_index/
+test_index_verify/
 # virtualenvs
 .venv/
 venv/

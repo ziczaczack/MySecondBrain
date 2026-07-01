@@ -136,6 +136,20 @@ def query(
             "Rebuild it with `python -m kb ingest <dir>` to use --since."
         )
 
+    # The index must have been built with the same embedding model we are about
+    # to encode the query with -- otherwise the query vector and the stored
+    # vectors live in different spaces (same dimensionality, meaningless cosine).
+    if metas:
+        index_model = metas[0].get("embed_model", embedding.LEGACY_MODEL)
+        current_model = embedding.current_model_name()
+        if index_model != current_model:
+            raise IncompatibleIndexError(
+                f"The index in '{index_dir}' was built with embedding model "
+                f"'{index_model}', but the current model is '{current_model}'. "
+                "Rebuild it with `python -m kb ingest <dir> --rebuild` (or set "
+                "$KB_EMBED_MODEL back to the original model)."
+            )
+
     query_vec = embedding.encode_one(question)
 
     cutoff = _parse_since(since)
@@ -224,6 +238,27 @@ def _ranks(scores: list[float]) -> list[int]:
     return ranks
 
 
+def _rrf_fuse(sem_scores: list[float], lex_scores: list[float]) -> list[float]:
+    """Fuse semantic and lexical scores into a per-doc RRF score.
+
+    Every doc gets its semantic RRF term. A doc only gets a *lexical* term when
+    it has positive lexical overlap (``lex_scores[i] > 0``); a doc that shares
+    no exact tokens with the query is absent from the lexical ranking and
+    contributes nothing from that channel. This keeps an all-zero or sparse
+    lexical signal -- the common case for CJK queries, where most docs share no
+    tokens -- from reordering the semantic ranking via phantom tie-broken ranks.
+    """
+    sem_rank = _ranks([float(s) for s in sem_scores])
+    lex_rank = _ranks([float(s) for s in lex_scores])
+    fused: list[float] = []
+    for i in range(len(sem_scores)):
+        score = 1.0 / (_RRF_K + sem_rank[i])
+        if lex_scores[i] > 0:
+            score += 1.0 / (_RRF_K + lex_rank[i])
+        fused.append(score)
+    return fused
+
+
 def _hybrid_hits(
     question: str,
     query_vec,
@@ -247,13 +282,7 @@ def _hybrid_hits(
     docs = [metas[i].get("chunk_text", "") for i in kept]
     lex = lexical.bm25_scores(question, docs)  # aligned to kept
 
-    sem_rank = _ranks([float(s) for s in sem])
-    lex_rank = _ranks(lex)
-
-    fused = [
-        1.0 / (_RRF_K + sem_rank[local]) + 1.0 / (_RRF_K + lex_rank[local])
-        for local in range(len(kept))
-    ]
+    fused = _rrf_fuse([float(s) for s in sem], list(lex))
 
     # Top-k local candidates by fused score, ties broken by local index.
     top_k = min(k, len(kept))

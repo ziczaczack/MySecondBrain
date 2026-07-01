@@ -14,14 +14,67 @@ from __future__ import annotations
 import math
 import re
 
-# A "token" is any run of word characters, lower-cased for case-insensitive
-# matching. Unicode-aware so non-ASCII notes tokenize sensibly.
-_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+# CJK Unicode ranges treated as single-character tokens. Mirrors ingest's
+# chunk tokenizer (kb/ingest.py) so the BM25 side segments Chinese/Japanese/
+# Korean the same way the dense side does -- otherwise a space-free CJK run
+# collapses into one giant token that never recurs and matches nothing.
+_CJK_CHARS = (
+    r"一-鿿"   # CJK Unified Ideographs
+    r"㐀-䶿"   # CJK Extension A
+    r"豈-﫿"   # CJK Compatibility Ideographs
+    r"぀-ゟ"   # Hiragana
+    r"゠-ヿ"   # Katakana
+    r"가-힯"   # Hangul Syllables
+)
+
+# A "token" is either a single CJK character or a run of word characters that
+# are NOT CJK (``[^\W...]`` is "a word char, but not one of these"). Lower-cased
+# for case-insensitive matching; punctuation is dropped.
+_TOKEN_RE = re.compile(rf"[{_CJK_CHARS}]|[^\W{_CJK_CHARS}]+", re.UNICODE)
+
+
+_CJK_CHAR_RE = re.compile(rf"[{_CJK_CHARS}]")
 
 
 def tokenize(text: str) -> list[str]:
-    """Split ``text`` into lower-cased word tokens."""
+    """Split ``text`` into lower-cased tokens (CJK at character granularity)."""
     return _TOKEN_RE.findall(text.lower())
+
+
+def _is_cjk_char(tok: str) -> bool:
+    return len(tok) == 1 and _CJK_CHAR_RE.match(tok) is not None
+
+
+def bm25_terms(text: str) -> list[str]:
+    """Tokenize for BM25, shingling consecutive CJK characters into bigrams.
+
+    Single Chinese/Japanese/Korean characters are far too common to be useful
+    keywords (``的``/``是``/``用`` appear everywhere), so a run of CJK characters
+    is emitted as overlapping 2-character shingles -- ``语音转文字`` becomes
+    ``语音``, ``音转``, ``转文``, ``文字``. Latin/digit tokens pass through
+    unchanged; an isolated single CJK character (no neighbour to pair with) is
+    kept as-is so it can still match.
+    """
+    terms: list[str] = []
+    run: list[str] = []
+
+    def flush() -> None:
+        if not run:
+            return
+        if len(run) == 1:
+            terms.append(run[0])
+        else:
+            terms.extend(run[i] + run[i + 1] for i in range(len(run) - 1))
+        run.clear()
+
+    for tok in tokenize(text):
+        if _is_cjk_char(tok):
+            run.append(tok)
+        else:
+            flush()
+            terms.append(tok)
+    flush()
+    return terms
 
 
 def bm25_scores(
@@ -46,14 +99,14 @@ def bm25_scores(
         A list of floats aligned to ``docs`` order.
     """
     # Unique, non-empty query terms. No terms or no docs -> nothing to score.
-    q_terms = {t for t in tokenize(question) if t}
+    q_terms = {t for t in bm25_terms(question) if t}
     if not q_terms or not docs:
         return [0.0] * len(docs)
 
     n = len(docs)
 
     # Tokenize each doc once; keep parallel lengths for normalization.
-    doc_tokens = [tokenize(d) for d in docs]
+    doc_tokens = [bm25_terms(d) for d in docs]
     doc_len = [len(toks) for toks in doc_tokens]
 
     avgdl = sum(doc_len) / n

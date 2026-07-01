@@ -1,3 +1,5 @@
+# Runtime dependencies. Prefer `pip install -e .` (see pyproject.toml), which
+# also exposes the `kb` command and the optional extras:
+#   [documents] PDF/.docx  ·  [synthesis] kb ask  ·  [dev] test suite
 sentence-transformers>=2.2
 numpy>=1.24
-pytest>=7.0

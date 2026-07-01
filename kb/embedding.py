@@ -1,9 +1,34 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 _model = None
-_MODEL_NAME = "all-MiniLM-L6-v2"
+
+# Default to a multilingual model so Chinese/Japanese/Korean notes embed in the
+# same space as English ones; the old English-only model (and any other) can be
+# selected via $KB_EMBED_MODEL. Switching models requires a re-ingest, which the
+# index's stamped model name enforces (see current_model_name / LEGACY_MODEL).
+_DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+
+
+def _model_name() -> str:
+    name = os.environ.get("KB_EMBED_MODEL", "").strip()
+    return name or _DEFAULT_MODEL
+
+
+def current_model_name() -> str:
+    """The embedding model that ingest/query will use right now.
+
+    Stamped into the index at ingest time and checked at query time so an index
+    built with one model is never searched with another.
+    """
+    return _model_name()
+
+
+# Indexes built before the model was stamped used this model exclusively.
+LEGACY_MODEL = "all-MiniLM-L6-v2"
 
 
 def _get_model():
@@ -12,7 +37,7 @@ def _get_model():
     if _model is None:
         from sentence_transformers import SentenceTransformer
 
-        _model = SentenceTransformer(_MODEL_NAME, device="cpu")
+        _model = SentenceTransformer(_model_name(), device="cpu")
     return _model
 
 

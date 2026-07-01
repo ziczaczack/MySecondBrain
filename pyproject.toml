@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kb"
+version = "0.1.0"
+description = "A pure-local personal knowledge base: ingest notes/code, embed locally, search semantically, and optionally synthesize cited answers."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "sentence-transformers>=2.2",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# Cited-answer synthesis (`kb ask`) talks to the Anthropic API.
+synthesis = ["anthropic>=0.39"]
+# Index PDF and .docx files in addition to plain text.
+documents = ["pypdf>=4", "python-docx>=1"]
+# Everything needed to run the test suite.
+dev = ["pytest>=7.0", "fpdf2>=2.7", "pypdf>=4", "python-docx>=1"]
+
+[project.scripts]
+kb = "kb.__main__:main"
+
+[tool.setuptools]
+packages = ["kb"]

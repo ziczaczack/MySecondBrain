@@ -474,7 +474,7 @@ def test_ingest_decodes_utf16_skips_binary(tmp_path):
     )
 
 
-def test_hybrid_surfaces_rare_token(tmp_path):
+def test_hybrid_surfaces_rare_token(tmp_path, monkeypatch):
     """Hybrid (semantic + BM25 via RRF) lifts a rare-token note above on-topic distractors.
 
     The target note carries a rare, high-IDF exact token plus query stop-words but
@@ -485,7 +485,18 @@ def test_hybrid_surfaces_rare_token(tmp_path):
     (b) exposes positive lexical evidence, and (c) preserves the non-hybrid dict
     shape. The assertion messages print the full rankings so a future embedding-model
     swap that breaks the scenario is debuggable.
+
+    The scenario is tuned to an English-text embedding model whose semantic
+    ranking leaves the target *below* a distractor (so hybrid has something to
+    prove). It is pinned to that model so it stays deterministic regardless of
+    the global default model.
     """
+    from kb import embedding
+
+    monkeypatch.setenv("KB_EMBED_MODEL", "all-MiniLM-L6-v2")
+    # The model is cached module-level, so a prior test may have loaded the
+    # default model already; drop the cache so the pinned model is actually used.
+    monkeypatch.setattr(embedding, "_model", None)
     docs = tmp_path / "docs"
     docs.mkdir()
 
