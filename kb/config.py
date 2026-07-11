@@ -63,15 +63,19 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Allowed values for a registered source's "kind" field.
-_VALID_KINDS = {"files", "bookmarks"}
+_VALID_KINDS = {"files", "bookmarks", "inbox"}
 
 # Built-in default synthesis model.  Overridable via $KB_MODEL or config.json.
 _DEFAULT_MODEL = "claude-opus-4-8"
 
 # Environment variable and config-file key checked for API key presence.
 _API_KEY_ENV = "ANTHROPIC_API_KEY"
+
+# Environment variable overriding the configured clips folder.
+_CLIPS_DIR_ENV = "KB_CLIPS_DIR"
 
 
 def kb_home() -> Path:
@@ -145,6 +149,53 @@ def api_key_source() -> str:
     if os.environ.get(_API_KEY_ENV):
         return f"env:{_API_KEY_ENV}"
     return "not configured"
+
+
+def clips_dir() -> Optional[str]:
+    """Return the configured clips folder, or ``None`` when unconfigured.
+
+    Resolution order (pure, never side-effecting — same shape as
+    :func:`synthesis_model`):
+
+    1. ``$KB_CLIPS_DIR`` if set and non-empty.
+    2. ``"clips_dir"`` key in ``<kb_home>/config.json``.
+    3. ``None`` — callers surface a "run kb clip --set-dir" hint.
+    """
+    env_val = os.environ.get(_CLIPS_DIR_ENV)
+    if env_val:
+        return env_val
+
+    cfg_path = kb_home() / "config.json"
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        val = data.get("clips_dir") if isinstance(data, dict) else None
+        if isinstance(val, str) and val:
+            return val
+    except Exception:
+        pass
+    return None
+
+
+def set_clips_dir(path: str) -> None:
+    """Persist *path* as ``clips_dir`` in ``<kb_home>/config.json``.
+
+    Merges into the existing config file so other keys (e.g. ``model``)
+    survive; an unreadable or corrupt file is replaced rather than fatal.
+    ``kb_home`` is created on write, mirroring :func:`_write_sources`.
+    """
+    home = kb_home()
+    home.mkdir(parents=True, exist_ok=True)
+    cfg_path = home / "config.json"
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    data["clips_dir"] = str(Path(path))
+    cfg_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def sources_path() -> Path:
