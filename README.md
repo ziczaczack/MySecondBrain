@@ -17,6 +17,7 @@ Optional features are pulled in as extras:
 ```sh
 pip install -e ".[documents]"   # also index PDF and .docx files
 pip install -e ".[synthesis]"   # enable `kb ask` (Anthropic SDK)
+pip install -e ".[clip]"        # enable `kb clip` and inbox capture (web/YouTube)
 pip install -e ".[dev]"         # run the test suite
 ```
 
@@ -81,6 +82,30 @@ kb add ~/notes   # incremental refresh
 kb watch         # or leave this running to auto-reindex on change (Ctrl+C to stop)
 ```
 
+**5. Capture from anywhere.**
+
+On the PC, clip any article or YouTube video straight into your knowledge
+base (one-time setup: point `kb clip` at a folder, e.g. a `Clips/` folder
+inside your Obsidian vault):
+
+```sh
+kb clip --set-dir "D:/vault/Clips"       # once
+kb clip https://example.com/great-post   # article -> markdown note, indexed
+kb clip --text "Agent memory notes"      # reads the note body from stdin
+```
+
+From your phone, share a URL into an `Inbox/` folder of your synced vault
+and let `kb watch` do the rest — it detects notes that contain only a URL,
+fetches the full article, and expands the note in place (the expanded copy
+syncs back to your phone as a read-later version):
+
+```sh
+kb add --inbox "D:/vault/Inbox"   # once
+kb watch                          # expands inbox notes + reindexes on change
+```
+
+Capture needs the `[clip]` extra: `pip install -e ".[clip]"`.
+
 > **Switching embedding models?** The model that built an index is stamped into
 > it, and `kb query`/`kb ask` refuse to search across a mismatch. After changing
 > `KB_EMBED_MODEL`, rebuild once: `kb ingest <dir> --rebuild`.
@@ -92,6 +117,8 @@ kb watch         # or leave this running to auto-reindex on change (Ctrl+C to st
 | `ingest <dir>`     | Embed and index a directory of notes, code, and (with `[documents]`) PDF/`.docx` files. |
 | `ingest-bookmarks` | Index bookmarks from a Chrome/Edge `Bookmarks` JSON file.          |
 | `add <path>`       | Register a folder (or `--bookmarks` file) as a source and index it.|
+| `clip <url>`       | Capture a web page or YouTube transcript into your clips folder and index it. `--text TITLE` clips stdin; `--set-dir` configures the folder. |
+| `add --inbox <path>` | Register an inbox folder: notes containing only a URL are auto-expanded into full articles by `kb watch`. |
 | `query "<q>"`      | Search the index. Pure-local retrieval, no API call.               |
 | `ask "<q>"`        | Ask a question; an LLM synthesizes an answer with citations.        |
 | `sources`          | List registered sources.                                           |
