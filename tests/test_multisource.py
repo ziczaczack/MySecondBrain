@@ -12,9 +12,6 @@ def _indexed_keys(index_dir) -> set[str]:
     metas = json.loads(
         (Path(index_dir) / "meta.json").read_text(encoding="utf-8")
     )
-    # meta.json layout: confirm against kb/store.py — adjust the two lines
-    # above/below ONLY if the stored structure differs (e.g. wrapper object
-    # with a "chunks"/"metas" list); the assertion style stays the same.
     return {m["key"] for m in metas}
 
 
