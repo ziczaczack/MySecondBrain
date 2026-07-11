@@ -90,3 +90,21 @@ def test_clip_text_mode_reads_stdin(home, monkeypatch):
 def test_clip_no_url_no_text_errors(home, monkeypatch):
     config.set_clips_dir(str(home / "Clips"))
     assert _run(["clip"], monkeypatch) == 1
+
+
+def test_clip_inside_registered_vault_does_not_reregister(home, monkeypatch):
+    vault = home / "vault"
+    clips = vault / "Clips"
+    clips.mkdir(parents=True)
+    config.add_source("files", str(vault))
+    config.set_clips_dir(str(clips))
+    doc = FetchedDoc(
+        title="Post", text="Body.", url="https://example.com/post", fetched_at=_TS
+    )
+    monkeypatch.setattr(cli, "fetch_url", lambda url, timeout=15.0: doc)
+    monkeypatch.setattr(cli, "ingest", lambda d, **kw: None)
+
+    assert _run(["clip", "https://example.com/post"], monkeypatch) == 0
+    kinds_paths = [(s.get("kind"), s.get("path")) for s in config.load_sources()]
+    assert ("files", str(clips)) not in kinds_paths, "nested clips dir must not be re-registered"
+    assert ("files", str(vault)) in kinds_paths

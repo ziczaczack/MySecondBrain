@@ -242,6 +242,16 @@ class Source(Protocol):
         """
         ...
 
+    def owns_key(self, key: str) -> bool:
+        """Return True when *key* falls inside this source's scope.
+
+        The ingest loop preserves previously indexed chunks whose keys this
+        source does NOT own (they belong to other registered sources sharing
+        the index). Chunks it does own that are no longer in
+        :meth:`candidate_keys` are treated as deleted and dropped.
+        """
+        ...
+
 
 # ---------------------------------------------------------------------------
 # FileSource — the only concrete source shipped today
@@ -278,6 +288,16 @@ class FileSource:
                         collected.append(p)
             self._paths = sorted(collected)
         return self._paths
+
+    def owns_key(self, key: str) -> bool:
+        """A file key is ours when it lies under our root (path-prefix test).
+
+        Pure string comparison via ``normcase``/``abspath`` — no filesystem
+        access, so it stays cheap when called per indexed key.
+        """
+        root = os.path.normcase(os.path.abspath(str(self._root)))
+        k = os.path.normcase(os.path.abspath(key))
+        return k == root or k.startswith(root + os.sep)
 
     def candidate_keys(self) -> set[str]:
         """All file paths (as strings) that pass the walk and suffix filter."""
@@ -422,6 +442,16 @@ class BookmarkSource:
     def _key(node: dict) -> str:
         """Identity key for a url node: prefer ``guid``, else the url."""
         return node.get("guid") or node.get("url") or ""
+
+    def owns_key(self, key: str) -> bool:
+        """Bookmark keys are guids or URLs — never absolute file paths.
+
+        Claiming every non-path key is deliberately coarse: it keeps deleted
+        bookmarks' removal detection working. Two different bookmark files
+        sharing one index would contend over each other's keys; acceptable
+        until a real use case appears.
+        """
+        return not os.path.isabs(key)
 
     def candidate_keys(self) -> set[str]:
         """All bookmark identity keys (guid, falling back to url).

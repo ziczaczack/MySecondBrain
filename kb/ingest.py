@@ -146,8 +146,14 @@ def _ingest_from_source(
     # Keys visible in this walk (used to detect removals).
     candidate_keys = source.candidate_keys()
 
-    # Keys in the old index that are no longer present on disk.
-    removed_count = sum(1 for k in old_by_key if k not in candidate_keys)
+    # A missing key is a deletion only if it belongs to this source's scope;
+    # keys owned by other sources sharing the index are preserved below.
+    # getattr fallback keeps third-party Source implementations (no owns_key)
+    # on the old replace-everything behavior.
+    owns_key = getattr(source, "owns_key", lambda _k: True)
+    removed_count = sum(
+        1 for k in old_by_key if k not in candidate_keys and owns_key(k)
+    )
 
     # --- Classify each candidate and build output lists in walk order ---
     # chunk_sources[i] is either ('reuse', old_row_idx) or ('new', new_batch_idx).
@@ -212,6 +218,15 @@ def _ingest_from_source(
             new_texts.append(chunk_text)
             new_metas.append(meta)
             final_metas.append(meta)
+
+    # --- Preserve chunks owned by other sources sharing this index ---
+    # Deterministic order: keys sorted, chunks in stored order within a key.
+    for key in sorted(old_by_key):
+        if key in candidate_keys or owns_key(key):
+            continue
+        for old_idx, meta in old_by_key[key]:
+            final_metas.append(meta)
+            chunk_sources.append(("reuse", old_idx))
 
     if not final_metas:
         print(f"No ingestible files found in '{label}'. Nothing was indexed.")

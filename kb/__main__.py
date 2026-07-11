@@ -236,6 +236,20 @@ def _run_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def _covered_by_files_source(folder: str) -> bool:
+    """True when *folder* equals or lies under a registered "files" source."""
+    import os as _os
+
+    target = _os.path.normcase(_os.path.abspath(folder))
+    for entry in config.load_sources():
+        if entry.get("kind") != "files" or not entry.get("path"):
+            continue
+        root = _os.path.normcase(_os.path.abspath(entry["path"]))
+        if target == root or target.startswith(root + _os.sep):
+            return True
+    return False
+
+
 def _run_clip(args: argparse.Namespace) -> int:
     if args.set_dir:
         config.set_clips_dir(args.set_dir)
@@ -281,8 +295,11 @@ def _run_clip(args: argparse.Namespace) -> int:
         print(f"Already clipped: {doc.url}")
         return 0
 
-    # First use registers the clips folder so query/watch cover it from now on.
-    config.add_source("files", clips)
+    # First use registers the clips folder so query/watch cover it — unless
+    # an already-registered files source contains it (e.g. Clips/ inside a
+    # registered vault), in which case that source already covers the clips.
+    if not _covered_by_files_source(clips):
+        config.add_source("files", clips)
     ingest(clips, index_dir=_resolve_index_dir(args.index_dir))
     print(f"Clipped: {path}")
     return 0
