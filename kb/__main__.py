@@ -8,6 +8,7 @@ import re
 import sys
 
 from . import config
+from .fetch import FetchedDoc, fetch_url
 from .ingest import DEFAULT_INDEX_DIR, ingest
 from .llm import KbLLMError
 from .query import IncompatibleIndexError, query
@@ -83,6 +84,34 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-synthesis",
         action="store_true",
         help="Skip LLM synthesis and return raw retrieval results (same as query).",
+    )
+
+    clip_p = sub.add_parser(
+        "clip",
+        help="Capture a web page / YouTube URL (or stdin text) into the clips folder.",
+    )
+    clip_p.add_argument(
+        "url",
+        nargs="?",
+        default=None,
+        help="URL to fetch. Requires the [clip] extra: pip install -e '.[clip]'.",
+    )
+    clip_p.add_argument(
+        "--text",
+        default=None,
+        metavar="TITLE",
+        help="Read a text clip from stdin and save it under TITLE.",
+    )
+    clip_p.add_argument(
+        "--set-dir",
+        default=None,
+        metavar="PATH",
+        help="Set and persist the clips folder, then exit.",
+    )
+    clip_p.add_argument(
+        "--index-dir",
+        default=None,
+        help="Override the managed index location (advanced).",
     )
 
     sub.add_parser("sources", help="List registered sources.")
@@ -191,6 +220,58 @@ def _run_add(args: argparse.Namespace) -> int:
         config.add_source("files", args.path)
         ingest(args.path, index_dir=index_dir)
         print(f"Added files source: {args.path}")
+    return 0
+
+
+def _run_clip(args: argparse.Namespace) -> int:
+    if args.set_dir:
+        config.set_clips_dir(args.set_dir)
+        print(f"Clips folder set to: {args.set_dir}")
+        return 0
+
+    clips = config.clips_dir()
+    if not clips:
+        print(
+            "No clips folder configured. "
+            "Run `kb clip --set-dir <folder>` first (e.g. a Clips/ folder "
+            "inside your Obsidian vault).",
+            file=sys.stderr,
+        )
+        return 1
+
+    import time as _time
+
+    if args.text is not None:
+        body = sys.stdin.read()
+        if not body.strip():
+            print("No text on stdin to clip.", file=sys.stderr)
+            return 1
+        doc = FetchedDoc(title=args.text, text=body, url="", fetched_at=_time.time())
+    elif args.url:
+        doc = fetch_url(args.url)
+        if doc is None:
+            print(
+                "Could not fetch that URL. Check the address and your network, "
+                "and that the capture extra is installed: "
+                "pip install -e \".[clip]\"",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        print("Provide a URL, or --text TITLE with content on stdin.", file=sys.stderr)
+        return 1
+
+    from .clip import save_clip
+
+    path = save_clip(doc, clips)
+    if path is None:
+        print(f"Already clipped: {doc.url}")
+        return 0
+
+    # First use registers the clips folder so query/watch cover it from now on.
+    config.add_source("files", clips)
+    ingest(clips, index_dir=_resolve_index_dir(args.index_dir))
+    print(f"Clipped: {path}")
     return 0
 
 
@@ -391,6 +472,8 @@ def main() -> None:
         sys.exit(_run_query(args))
     elif args.command == "ask":
         sys.exit(_run_ask(args))
+    elif args.command == "clip":
+        sys.exit(_run_clip(args))
     elif args.command == "sources":
         sys.exit(_run_sources(args))
     elif args.command == "watch":
