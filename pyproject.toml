@@ -18,8 +18,10 @@ dependencies = [
 synthesis = ["anthropic>=0.39"]
 # Index PDF and .docx files in addition to plain text.
 documents = ["pypdf>=4", "python-docx>=1"]
+# Web/YouTube capture (`kb clip` and inbox expansion).
+clip = ["trafilatura>=1.8", "youtube-transcript-api>=0.6"]
 # Everything needed to run the test suite.
-dev = ["pytest>=7.0", "fpdf2>=2.7", "pypdf>=4", "python-docx>=1"]
+dev = ["pytest>=7.0", "fpdf2>=2.7", "pypdf>=4", "python-docx>=1", "trafilatura>=1.8"]
 
 [project.scripts]
 kb = "kb.__main__:main"
