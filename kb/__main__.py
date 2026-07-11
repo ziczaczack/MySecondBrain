@@ -68,6 +68,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Treat <path> as a Chrome/Edge Bookmarks JSON file.",
     )
     add_p.add_argument(
+        "--inbox",
+        action="store_true",
+        help="Register <path> as an inbox folder: notes containing only a "
+        "URL are auto-expanded into full articles by `kb watch`.",
+    )
+    add_p.add_argument(
         "--index-dir",
         default=None,
         help="Override the managed index location (advanced).",
@@ -207,6 +213,9 @@ def _run_ingest_bookmarks(args: argparse.Namespace) -> int:
 
 def _run_add(args: argparse.Namespace) -> int:
     index_dir = _resolve_index_dir(args.index_dir)
+    if args.bookmarks and args.inbox:
+        print("--bookmarks and --inbox are mutually exclusive.", file=sys.stderr)
+        return 1
     if args.bookmarks:
         config.add_source("bookmarks", args.path)
         from .ingest import _ingest_from_source
@@ -216,6 +225,10 @@ def _run_add(args: argparse.Namespace) -> int:
             BookmarkSource(args.path), index_dir=index_dir, label=args.path
         )
         print(f"Added bookmarks source: {args.path}")
+    elif args.inbox:
+        config.add_source("inbox", args.path)
+        ingest(args.path, index_dir=index_dir)
+        print(f"Added inbox source: {args.path}")
     else:
         config.add_source("files", args.path)
         ingest(args.path, index_dir=index_dir)

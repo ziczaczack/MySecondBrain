@@ -33,6 +33,7 @@ from typing import Optional
 from . import config
 from .ingest import ingest as ingest_fn
 from .source import FileSource
+from .inbox import process_inbox
 
 
 def _snapshot(folder: str) -> dict[str, tuple[float, int]]:
@@ -63,14 +64,25 @@ def _snapshot(folder: str) -> dict[str, tuple[float, int]]:
 
 
 def _files_folders() -> list[str]:
-    """Return the normalized paths of every registered ``"files"`` source.
+    """Normalized paths of every source the file watcher should index.
 
-    Bookmark sources are intentionally ignored by the watcher at this stage.
+    Inbox folders are watched exactly like ``"files"`` sources — expansion
+    rewrites notes on disk, and those rewrites must trigger a reingest.
+    Bookmark sources remain ignored by the watcher at this stage.
     """
     return [
         entry["path"]
         for entry in config.load_sources()
-        if entry.get("kind") == "files" and entry.get("path")
+        if entry.get("kind") in ("files", "inbox") and entry.get("path")
+    ]
+
+
+def _inbox_folders() -> list[str]:
+    """Normalized paths of every registered ``"inbox"`` source."""
+    return [
+        entry["path"]
+        for entry in config.load_sources()
+        if entry.get("kind") == "inbox" and entry.get("path")
     ]
 
 
@@ -86,8 +98,10 @@ def run_once(
     The cycle:
 
     1. Resolve *index_dir* to :func:`kb.config.default_index_dir` when ``None``.
+    1.5. Expand bare-URL notes in every registered inbox folder (isolated per
+         folder), so this cycle's snapshot already sees the expanded notes.
     2. Build a combined ``path -> (mtime, size)`` snapshot across every
-       registered ``"files"`` source (bookmarks are ignored here).
+       registered ``"files"``/``"inbox"`` source (bookmarks are ignored here).
     3. Compare to *state* (a snapshot of the same shape).  ``None``/empty is the
        *first run* -- when there are registered files it counts as *changed*.
     4. On any difference (added, removed, or changed file) re-ingest each
@@ -99,6 +113,20 @@ def run_once(
     """
     if index_dir is None:
         index_dir = config.default_index_dir()
+
+    # Inbox step first, so this cycle's snapshot sees the expanded notes and
+    # the normal diff-and-reingest path picks them up immediately. Isolated:
+    # an inbox failure (offline, bad folder) must never break the cycle.
+    for inbox_folder in _inbox_folders():
+        try:
+            n = process_inbox(inbox_folder)
+            if n:
+                print(f"kb watch: expanded {n} inbox note(s) in {inbox_folder}")
+        except Exception as exc:
+            print(
+                f"kb watch: inbox step failed for {inbox_folder}: {exc}",
+                file=sys.stderr,
+            )
 
     folders = _files_folders()
 
