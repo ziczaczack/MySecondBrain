@@ -28,3 +28,7 @@ kb = "kb.__main__:main"
 
 [tool.setuptools]
 packages = ["kb"]
+
+# The web UI page ships with the package; kb serve reads it from disk.
+[tool.setuptools.package-data]
+kb = ["web/*.html"]

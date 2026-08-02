@@ -106,6 +106,14 @@ kb watch                          # expands inbox notes + reindexes on change
 
 Capture needs the `[clip]` extra: `pip install -e ".[clip]"`.
 
+**6. Or skip the terminal entirely.** `kb serve` puts search, ask, and clip in a
+browser — see [The web UI](#the-web-ui) below.
+
+```sh
+kb serve                    # http://127.0.0.1:7777
+kb serve --host 0.0.0.0     # also reachable from your phone on the same wifi
+```
+
 > **Switching embedding models?** The model that built an index is stamped into
 > it, and `kb query`/`kb ask` refuse to search across a mismatch. After changing
 > `KB_EMBED_MODEL`, rebuild once: `kb ingest <dir> --rebuild`.
@@ -121,6 +129,7 @@ Capture needs the `[clip]` extra: `pip install -e ".[clip]"`.
 | `add --inbox <path>` | Register an inbox folder: notes containing only a URL are auto-expanded into full articles by `kb watch`. |
 | `query "<q>"`      | Search the index. Pure-local retrieval, no API call.               |
 | `ask "<q>"`        | Ask a question; an LLM synthesizes an answer with citations.        |
+| `serve`            | Serve the web UI — search, ask, and clip from a browser. Add `--host 0.0.0.0` to reach it from your phone. |
 | `sources`          | List registered sources.                                           |
 | `watch`            | Watch registered folders and auto-reindex on change.               |
 | `status`           | Show statistics about an existing index.                           |
@@ -137,6 +146,69 @@ Both `query` and `ask` accept the same retrieval options:
 | `--hybrid`            | Fuse semantic + keyword (BM25) ranking via RRF.                   |
 | `--index-dir <dir>`   | Index directory to search (default: the managed knowledge base).  |
 | `--json`              | Output results as JSON.                                           |
+
+## The web UI
+
+`kb serve` runs a small local web server so you can use the knowledge base from
+a browser instead of a terminal. Three modes share one input box:
+
+| Mode       | What it does                                                     |
+| ---------- | ---------------------------------------------------------------- |
+| **Search** | Results as you type. Pure-local, no network.                     |
+| **Ask**    | A cited answer. The only mode that contacts the API.             |
+| **Clip**   | Paste a link; the article is fetched into your clips folder and indexed. |
+
+Result headings link to `obsidian://` so a click opens the note in Obsidian at
+the right file. The page is one self-contained HTML file — no CDN, no bundler,
+no JavaScript dependencies — and the server is `http.server` from the standard
+library, so `serve` adds nothing to the install.
+
+```sh
+kb serve                  # http://127.0.0.1:7777 — this machine only
+kb serve --port 8080      # somewhere else
+```
+
+### Reaching it from your phone
+
+Binding to `0.0.0.0` publishes the UI to your local network, so anything on the
+same wifi can open it:
+
+```sh
+kb serve --host 0.0.0.0
+```
+
+```
+kb is serving at  http://127.0.0.1:7777/?t=Xq3n_pW8sKdM
+On your phone:    http://192.168.1.24:7777/?t=Xq3n_pW8sKdM
+```
+
+Because that hands the whole knowledge base — and your API credits, via Ask —
+to anyone on the network, a token is generated automatically and required on
+every request. Pass your own with `--token` if you want a stable URL you can
+bookmark on the phone. **This is a speed bump for a home network, not
+authentication: do not port-forward it to the internet.**
+
+No vault syncing is involved. Your notes stay on the PC; the phone is a thin
+client over wifi. The tradeoff is that the PC has to be awake with `kb serve`
+running.
+
+### One-tap capture from the phone share sheet
+
+Point your phone's share sheet at the clip endpoint and saving an article
+becomes a single tap from any browser or app.
+
+**iOS** — Shortcuts app → new shortcut → *Get URLs from Input* → *Get Contents
+of URL*, set to `POST`, Request Body `JSON`, one text field `url` = the URL from
+the previous step, with the address:
+
+```
+http://192.168.1.24:7777/api/clip?t=YOUR_TOKEN
+```
+
+Then turn on *Show in Share Sheet* in the shortcut's settings.
+
+**Android** — the *HTTP Shortcuts* app does the same thing: a `POST` to that
+address with body `{"url": "..."}` and "register as share target" enabled.
 
 ## Asking questions: `kb ask`
 
@@ -250,5 +322,10 @@ python -m kb ingest <dir> --rebuild
   are sent to the Anthropic API to produce the answer.
 - **`kb query` and `kb ask --no-synthesis` never call any API.** They perform
   pure-local retrieval only.
+- **`kb serve` binds to `127.0.0.1` by default**, so the web UI is reachable
+  only from this machine, and its page loads no external scripts, fonts, or
+  styles. `--host 0.0.0.0` is an explicit decision to publish the knowledge
+  base to your local network; it requires a token, and it should never be
+  exposed beyond it.
 
 If you never run `kb ask`, no data ever leaves your machine.
