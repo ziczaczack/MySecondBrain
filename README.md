@@ -208,11 +208,11 @@ disk**.
 
 ### Choosing the synthesis model
 
-The synthesis model defaults to `claude-opus-4-8`. Override it with the
+The synthesis model defaults to `claude-opus-5`. Override it with the
 `KB_MODEL` environment variable:
 
 ```sh
-export KB_MODEL=claude-opus-4-8
+export KB_MODEL=claude-opus-4-8   # e.g. pin the previous generation
 ```
 
 ## Embedding model
