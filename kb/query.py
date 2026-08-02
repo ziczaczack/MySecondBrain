@@ -104,11 +104,13 @@ def query(
             False, preserving the pure semantic ranking.
 
     Returns:
-        A list of result dicts ``{"filename", "path", "excerpt", "score",
-        "start_line", "mtime", "date", "kind"}`` ordered best-first.
-        ``excerpt`` is the matched passage; ``mtime``/``date`` describe the
-        source freshness; ``kind`` is ``"note"`` or ``"code"``. Hybrid mode
-        adds ``"semantic_score"`` and ``"lexical_score"`` to each dict.
+        A list of result dicts ``{"filename", "path", "text", "excerpt",
+        "score", "start_line", "mtime", "date", "kind"}`` ordered best-first.
+        ``text`` is the full matched chunk (what :mod:`kb.answer` feeds the
+        model); ``excerpt`` is its truncated one-line form for display.
+        ``mtime``/``date`` describe the source freshness; ``kind`` is
+        ``"note"`` or ``"code"``. Hybrid mode adds ``"semantic_score"`` and
+        ``"lexical_score"`` to each dict.
 
     Raises:
         FileNotFoundError: If no index exists in ``index_dir``.
@@ -198,10 +200,15 @@ def query(
             if mtime is not None
             else ""
         )
-        excerpt = _make_excerpt(meta.get("chunk_text", ""))
+        chunk_text = meta.get("chunk_text", "")
+        excerpt = _make_excerpt(chunk_text)
         result = {
             "filename": meta.get("filename", ""),
             "path": meta.get("path", ""),
+            # Two views of the same passage: "text" is the whole retrieved
+            # chunk (what synthesis reads), "excerpt" is the bounded one-line
+            # form (what the terminal prints).
+            "text": chunk_text,
             "excerpt": excerpt,
             "start_line": meta.get("start_line", 1),
             "score": score,

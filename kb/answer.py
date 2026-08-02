@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     pass
 
 # ---------------------------------------------------------------------------
-# Frozen system prompt — constant across all calls so the LLM cache can reuse
-# the encoded representation after the first request.
+# Frozen system prompt — one constant, so answer behaviour is identical across
+# calls and any change to it is a visible edit here rather than a runtime knob.
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = (
@@ -97,10 +97,13 @@ def answer(
 
     # Build a provenance-tagged context block for the user turn.
     # Each chunk gets a "[N] filename · line M" header so the model can cite it.
+    # The model reads the *full* chunk ("text"); "excerpt" is the display-only
+    # truncation and is the fallback for callers that predate the text key.
     context_parts: list[str] = []
     for n, chunk in enumerate(chunks, 1):
         header = f"[{n}] {chunk['filename']} · line {chunk['start_line']}"
-        context_parts.append(f"{header}\n{chunk['excerpt']}")
+        passage = chunk.get("text") or chunk.get("excerpt", "")
+        context_parts.append(f"{header}\n{passage}")
     context = "\n\n".join(context_parts)
 
     if provider is None:
