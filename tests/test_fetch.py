@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import kb.fetch as fetch
 
 # Realistic-enough article HTML: trafilatura needs a few substantial
@@ -45,6 +47,10 @@ def test_youtube_video_id_rejects_non_youtube():
 
 
 def test_extract_article_returns_title_and_text():
+    # extract_article() returns None both when trafilatura is absent and when a
+    # page has no main content, so without the library this test cannot tell a
+    # real regression from a missing optional dep. Skip rather than fail red.
+    pytest.importorskip("trafilatura")
     result = fetch.extract_article(ARTICLE_HTML)
     assert result is not None
     title, text = result
@@ -64,6 +70,7 @@ def test_fetch_url_rejects_non_http_schemes():
 
 
 def test_fetch_url_article_path(monkeypatch):
+    pytest.importorskip("trafilatura")
     monkeypatch.setattr(
         fetch, "_http_get", lambda url, timeout: ARTICLE_HTML.encode("utf-8")
     )
