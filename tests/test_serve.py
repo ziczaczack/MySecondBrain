@@ -193,3 +193,94 @@ def test_clip_endpoint_saves_and_indexes(monkeypatch, tmp_path):
     assert saved.endswith(".md")
     assert "Partial Indexes" in (clips / "Partial-Indexes.md").read_text(encoding="utf-8")
     assert indexed == [str(clips)], "a new clip must be indexed immediately"
+
+
+def test_status_endpoint_reports_sources_and_counts(monkeypatch):
+    """GET /api/status answers "what am I actually searching?" without a terminal."""
+    monkeypatch.setattr(
+        serve_mod,
+        "index_status",
+        lambda index_dir: {
+            "exists": True,
+            "index_dir": index_dir,
+            "files": 38,
+            "chunks": 87,
+            "kinds": {"note": 78, "code": 9},
+            "index_bytes": 274227,
+            "last_ingest_date": "2026-07-13 00:37",
+        },
+    )
+    monkeypatch.setattr(
+        serve_mod.config,
+        "load_sources",
+        lambda: [{"kind": "files", "path": r"D:\KnowledgeBase"}],
+    )
+    monkeypatch.setattr(serve_mod.config, "clips_dir", lambda: r"D:\KnowledgeBase\Clips")
+
+    with running() as base:
+        status, body = _request(base + "/api/status")
+
+    assert status == 200, body
+    payload = json.loads(body)
+    assert payload["files"] == 38 and payload["chunks"] == 87
+    assert payload["sources"] == [{"kind": "files", "path": r"D:\KnowledgeBase"}]
+    assert payload["clips_dir"] == r"D:\KnowledgeBase\Clips"
+    assert payload["last_ingest_date"] == "2026-07-13 00:37"
+
+
+def test_reindex_endpoint_reingests_every_registered_folder(monkeypatch):
+    """POST /api/reindex re-ingests each registered folder and reports what ran.
+
+    It deliberately does not report a chunk total: ingest() returns the size of
+    the whole index after its pass, not the number of chunks it contributed, so
+    summing across folders that share an index would multiply-count. The client
+    re-reads /api/status for counts instead.
+    """
+    monkeypatch.setattr(serve_mod, "_files_folders", lambda: ["/notes", "/code"])
+    seen = []
+    monkeypatch.setattr(
+        serve_mod, "ingest", lambda folder, index_dir=None: seen.append(folder)
+    )
+
+    with running() as base:
+        status, body = _request(base + "/api/reindex", {})
+
+    assert status == 200, body
+    payload = json.loads(body)
+    assert seen == ["/notes", "/code"]
+    assert payload["folders"] == 2
+    assert payload["failed"] == []
+    assert "chunks" not in payload
+
+
+def test_reindex_reports_a_failing_folder_without_aborting(monkeypatch):
+    """One unreadable source must not take down the whole reindex."""
+    monkeypatch.setattr(serve_mod, "_files_folders", lambda: ["/gone", "/ok"])
+    seen = []
+
+    def fake_ingest(folder, index_dir=None):
+        if folder == "/gone":
+            raise OSError("vanished")
+        seen.append(folder)
+
+    monkeypatch.setattr(serve_mod, "ingest", fake_ingest)
+
+    with running() as base:
+        status, body = _request(base + "/api/reindex", {})
+
+    assert status == 200, body
+    payload = json.loads(body)
+    assert seen == ["/ok"], "the healthy folder must still be indexed"
+    assert payload["folders"] == 1, "only the folder that succeeded is counted"
+    assert [f["path"] for f in payload["failed"]] == ["/gone"]
+    assert "vanished" in payload["failed"][0]["error"]
+
+
+def test_reindex_with_no_sources_says_so(monkeypatch):
+    monkeypatch.setattr(serve_mod, "_files_folders", lambda: [])
+
+    with running() as base:
+        status, body = _request(base + "/api/reindex", {})
+
+    assert status == 400, body
+    assert "kb add" in json.loads(body)["error"]

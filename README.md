@@ -163,6 +163,18 @@ the right file. The page is one self-contained HTML file — no CDN, no bundler,
 no JavaScript dependencies — and the server is `http.server` from the standard
 library, so `serve` adds nothing to the install.
 
+A footer shows what you are actually searching, so you never have to go back to
+`kb sources` / `kb status` to find out:
+
+```
+D:\KnowledgeBase  ·  38 files  ·  87 chunks  ·  indexed 2026-08-03 22:49   [reindex]
+```
+
+Hover it for the index and clips directories. **reindex** re-scans every
+registered folder — incremental, so an unchanged vault costs almost nothing.
+Unlike a `kb watch` cycle it never expands inbox notes, so a button in a browser
+can't trigger outbound fetches.
+
 ```sh
 kb serve                  # http://127.0.0.1:7777 — this machine only
 kb serve --port 8080      # somewhere else

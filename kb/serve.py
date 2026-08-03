@@ -15,8 +15,12 @@ Routes
 ``GET  /``            the page itself.
 ``GET  /api/search``  ``?q=`` plus the usual ``k`` / ``kind`` / ``since`` /
                       ``hybrid`` options; pure-local retrieval.
+``GET  /api/status``  which folders are indexed, how much, and how stale.
 ``POST /api/ask``     ``{"question": ...}``; the only route that leaves the machine.
 ``POST /api/clip``    ``{"url": ...}``; fetch, save into the clips folder, reindex.
+``POST /api/reindex`` re-ingest every registered folder. Local only -- unlike a
+                      watch cycle it does not expand inbox notes, so pressing a
+                      button in a browser never triggers outbound fetches.
 
 Exposure
 --------
@@ -44,6 +48,11 @@ from .fetch import fetch_url
 from .ingest import ingest
 from .llm import KbLLMError
 from .query import IncompatibleIndexError, query
+from .status import status as index_status
+
+# Reuse the watcher's notion of which registered sources are re-ingestable, so
+# "reindex" here and a watch cycle always cover the same folders.
+from .watch import _files_folders
 
 DEFAULT_PORT = 7777
 
@@ -154,6 +163,8 @@ def _build_handler(index_dir: str, token: str | None):
                 return self._serve_page()
             if parsed.path == "/api/search":
                 return self._search(params)
+            if parsed.path == "/api/status":
+                return self._status()
             return self._error(404, f"No such path: {parsed.path}")
 
         def do_POST(self):  # noqa: N802 - stdlib hook name
@@ -171,6 +182,8 @@ def _build_handler(index_dir: str, token: str | None):
                 return self._ask(body)
             if parsed.path == "/api/clip":
                 return self._clip(body)
+            if parsed.path == "/api/reindex":
+                return self._reindex()
             return self._error(404, f"No such path: {parsed.path}")
 
         def _serve_page(self) -> None:
@@ -179,6 +192,38 @@ def _build_handler(index_dir: str, token: str | None):
             except OSError:
                 return self._error(500, "The web page asset is missing.")
             self._send(200, html, "text/html; charset=utf-8")
+
+        def _status(self) -> None:
+            """What is indexed, from where, and when -- the footer's data."""
+            info = dict(index_status(index_dir))
+            info["sources"] = config.load_sources()
+            info["clips_dir"] = config.clips_dir()
+            self._json(200, info)
+
+        def _reindex(self) -> None:
+            """Re-ingest every registered folder, isolating per-folder failures.
+
+            Reports only which folders ran, not a chunk total: ``ingest`` returns
+            the size of the whole index after its pass, so summing across folders
+            that share one index would multiply-count. The client re-reads
+            ``/api/status`` for the authoritative numbers.
+            """
+            folders = _files_folders()
+            if not folders:
+                return self._error(
+                    400, "No sources registered. Run `kb add <folder>` first."
+                )
+            failed: list[dict] = []
+            for folder in folders:
+                try:
+                    ingest(folder, index_dir=index_dir)
+                except Exception as err:
+                    # Mirrors the watcher: one unreadable source is reported,
+                    # never fatal to the rest of the pass.
+                    failed.append({"path": folder, "error": str(err)})
+            self._json(
+                200, {"folders": len(folders) - len(failed), "failed": failed}
+            )
 
         def _search(self, params: dict) -> None:
             question = (_first(params, "q") or "").strip()

@@ -84,6 +84,20 @@
   .dim { color: var(--muted); }
   .snippet { color: var(--muted); overflow-wrap: anywhere; }
   .snippet b { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 2.5rem; padding-top: .8rem; border-top: 1px solid var(--line);
+    display: flex; gap: .75rem; align-items: center; flex-wrap: wrap;
+    font-size: .78rem; color: var(--muted);
+  }
+  #infotext { overflow-wrap: anywhere; }
+  footer button {
+    font: inherit; cursor: pointer; margin-left: auto; white-space: nowrap;
+    color: var(--muted); background: none;
+    border: 1px solid var(--line); border-radius: .4rem; padding: .2rem .55rem;
+  }
+  footer button:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+  footer button:disabled { opacity: .5; cursor: default; }
 </style>
 </head>
 <body>
@@ -121,6 +135,11 @@
 
   <div class="status" id="status"></div>
   <div id="out"></div>
+
+  <footer>
+    <span id="infotext">…</span>
+    <button type="button" id="reindex" title="Re-scan every registered folder for changes">reindex</button>
+  </footer>
 </div>
 
 <script>
@@ -249,6 +268,48 @@
       .catch(function (e) { if (mine === seq) { say(e.message, true); } });
   }
 
+  // Footer: what is actually being searched, and a way to refresh it.
+  function renderStatus(s) {
+    var info = $("infotext");
+    if (!s.exists) {
+      info.textContent = "No index yet — run  kb add <folder>";
+      info.removeAttribute("title");
+      return;
+    }
+    var parts = (s.sources || []).map(function (x) { return x.path; });
+    parts.push(s.files + (s.files === 1 ? " file" : " files"));
+    parts.push(s.chunks + (s.chunks === 1 ? " chunk" : " chunks"));
+    if (s.last_ingest_date) { parts.push("indexed " + s.last_ingest_date); }
+    info.textContent = parts.join("  ·  ");
+    var detail = "index: " + s.index_dir;
+    if (s.clips_dir) { detail += "\nclips: " + s.clips_dir; }
+    info.title = detail;
+  }
+
+  function loadStatus() {
+    api("/api/status")
+      .then(renderStatus)
+      .catch(function (e) { $("infotext").textContent = e.message; });
+  }
+
+  $("reindex").addEventListener("click", function () {
+    var btn = this, label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "reindexing…";
+    api("/api/reindex", {})
+      .then(function (d) {
+        var msg = "Reindexed " + d.folders + (d.folders === 1 ? " folder." : " folders.");
+        if (d.failed && d.failed.length) {
+          msg += " Could not read: " + d.failed.map(function (f) { return f.path; }).join(", ");
+        }
+        say(msg, !!(d.failed && d.failed.length));
+        loadStatus();
+        if (mode === "search") { runSearch(); }
+      })
+      .catch(function (e) { say(e.message, true); })
+      .then(function () { btn.disabled = false; btn.textContent = label; });
+  });
+
   var debounce;
   q.addEventListener("input", function () {
     if (mode !== "search") { return; }
@@ -284,6 +345,8 @@
       q.focus();
     });
   });
+
+  loadStatus();
 })();
 </script>
 </body>
