@@ -69,10 +69,11 @@ but plain semantic search is the safe default for conceptual questions.
 **3. Ask — the only step that hits the network** (see setup below).
 
 ```sh
-export ANTHROPIC_API_KEY=sk-ant-...
 kb ask "what was my plan for auto-editing videos?"
 kb ask "..." --no-synthesis   # skip the LLM; return raw passages like `kb query`
 ```
+
+Needs an API key in your environment — see [Setup for synthesis](#setup-for-synthesis).
 
 **4. Keep the index fresh.** Re-running `add` on a registered source is
 incremental — only changed files are re-embedded:
@@ -167,10 +168,12 @@ A footer shows what you are actually searching, so you never have to go back to
 `kb sources` / `kb status` to find out:
 
 ```
-D:\KnowledgeBase  ·  38 files  ·  87 chunks  ·  indexed 2026-08-03 22:49   [reindex]
+D:\KnowledgeBase · 38 files · 87 chunks · indexed 2026-08-03 22:49   key: set   [reindex]
 ```
 
-Hover it for the index and clips directories. **reindex** re-scans every
+Hover it for the index and clips directories. `key: not set` means Ask will
+fail — see [Setup for synthesis](#setup-for-synthesis). Only the *source* of the
+key is ever reported, never its value. **reindex** re-scans every
 registered folder — incremental, so an unchanged vault costs almost nothing.
 Unlike a `kb watch` cycle it never expands inbox notes, so a button in a browser
 can't trigger outbound fetches.
@@ -273,31 +276,73 @@ python -m kb ask "..." --no-synthesis
 
 ## Setup for synthesis
 
-Synthesis requires an Anthropic API key in your environment:
+Synthesis requires an Anthropic API key in your environment. Get one from the
+[Anthropic Console](https://console.anthropic.com/settings/keys).
+
+**macOS / Linux**
 
 ```sh
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...          # this shell
+echo 'export ANTHROPIC_API_KEY=sk-ant-...' >> ~/.zshrc   # and every future one
 ```
+
+**Windows (PowerShell)**
+
+```powershell
+setx ANTHROPIC_API_KEY "sk-ant-..."          # persists for your user account
+$env:ANTHROPIC_API_KEY = "sk-ant-..."        # and the shell you are in now
+```
+
+You need both lines on Windows: `setx` writes to your user environment and only
+applies to **newly launched** processes, including the shell you typed it in. A
+running `kb serve` keeps the environment it started with, so **restart it** after
+setting the key or Ask will go on reporting a missing one.
+
+Check it took without spending a call:
+
+```sh
+kb status        # last line reads  API key: env:ANTHROPIC_API_KEY
+```
+
+The web UI shows the same thing in its footer (`key: set` / `key: not set`).
 
 If the key is unset, `kb ask` fails with a friendly message instead of a stack
-trace:
+trace — naming the right shell for your platform:
 
 ```
-ANTHROPIC_API_KEY is not set. Export it before running kb:
-  export ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY is not set. Set it before running kb:
+  setx ANTHROPIC_API_KEY "sk-ant-..."   (then open a new shell, or restart kb serve)
 ```
 
 The key is read from the environment on every run and is **never written to
-disk**.
+disk** — there is deliberately no config-file slot for it.
 
 ### Choosing the synthesis model
 
-The synthesis model defaults to `claude-opus-5`. Override it with the
-`KB_MODEL` environment variable:
+The synthesis model defaults to `claude-opus-5`. For a cheaper option on what is
+mostly a grounded-summarisation task, `claude-haiku-4-5` is a fifth of the price
+and does not think, which is where most of the cost sits.
+
+Override for one session with `KB_MODEL`:
 
 ```sh
-export KB_MODEL=claude-opus-4-8   # e.g. pin the previous generation
+export KB_MODEL=claude-haiku-4-5             # macOS / Linux
+$env:KB_MODEL = "claude-haiku-4-5"           # Windows (PowerShell)
 ```
+
+Or persist it in `<kb_home>/config.json`, which is tidier for a permanent
+choice (`%APPDATA%\kb\config.json` on Windows):
+
+```json
+{
+  "model": "claude-haiku-4-5"
+}
+```
+
+Resolution order is `$KB_MODEL` → `config.json` → the built-in default, so the
+environment variable still wins when you want to A/B two models. Switching the
+synthesis model never requires a re-ingest — only the *embedding* model is
+stamped into the index.
 
 ## Embedding model
 
@@ -311,7 +356,8 @@ Override the model with `KB_EMBED_MODEL` (e.g. the smaller English-only
 `all-MiniLM-L6-v2`):
 
 ```sh
-export KB_EMBED_MODEL=all-MiniLM-L6-v2
+export KB_EMBED_MODEL=all-MiniLM-L6-v2       # macOS / Linux
+$env:KB_EMBED_MODEL = "all-MiniLM-L6-v2"     # Windows (PowerShell)
 ```
 
 The model that built an index is stamped into it. Switching models requires a

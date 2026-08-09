@@ -520,6 +520,9 @@ def _run_status(args: argparse.Namespace) -> int:
     print(f"Kinds:           {kinds_str}")
     print(f"Index size:      {_humanize_bytes(st.get('index_bytes', 0))}")
     print(f"Last ingest:     {last}")
+    # Where the synthesis key comes from, never its value. Surfaced here so a
+    # missing key is discoverable without running `kb ask` and watching it fail.
+    print(f"API key:         {config.api_key_source()}")
     return 0
 
 

@@ -284,3 +284,25 @@ def test_reindex_with_no_sources_says_so(monkeypatch):
 
     assert status == 400, body
     assert "kb add" in json.loads(body)["error"]
+
+
+@pytest.mark.parametrize("label", ["env:ANTHROPIC_API_KEY", "not configured"])
+def test_status_endpoint_reports_the_api_key_source(monkeypatch, label):
+    """/api/status says whether Ask can work, without spending a call to find out."""
+    monkeypatch.setattr(
+        serve_mod,
+        "index_status",
+        lambda index_dir: {
+            "exists": True, "index_dir": index_dir, "files": 1, "chunks": 1,
+            "kinds": {"note": 1}, "index_bytes": 0, "last_ingest_date": "",
+        },
+    )
+    monkeypatch.setattr(serve_mod.config, "load_sources", lambda: [])
+    monkeypatch.setattr(serve_mod.config, "clips_dir", lambda: None)
+    monkeypatch.setattr(serve_mod.config, "api_key_source", lambda: label)
+
+    with running() as base:
+        status, body = _request(base + "/api/status")
+
+    assert status == 200, body
+    assert json.loads(body)["api_key"] == label

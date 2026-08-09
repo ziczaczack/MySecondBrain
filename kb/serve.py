@@ -198,6 +198,9 @@ def _build_handler(index_dir: str, token: str | None):
             info = dict(index_status(index_dir))
             info["sources"] = config.load_sources()
             info["clips_dir"] = config.clips_dir()
+            # A label, never the key itself -- so the page can warn that Ask
+            # will fail without anyone having to spend a call to find out.
+            info["api_key"] = config.api_key_source()
             self._json(200, info)
 
         def _reindex(self) -> None:

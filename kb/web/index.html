@@ -91,6 +91,7 @@
     font-size: .78rem; color: var(--muted);
   }
   #infotext { overflow-wrap: anywhere; }
+  #keystate.warn { color: var(--accent); }
   footer button {
     font: inherit; cursor: pointer; margin-left: auto; white-space: nowrap;
     color: var(--muted); background: none;
@@ -138,6 +139,7 @@
 
   <footer>
     <span id="infotext">…</span>
+    <span id="keystate"></span>
     <button type="button" id="reindex" title="Re-scan every registered folder for changes">reindex</button>
   </footer>
 </div>
@@ -270,7 +272,16 @@
 
   // Footer: what is actually being searched, and a way to refresh it.
   function renderStatus(s) {
-    var info = $("infotext");
+    var info = $("infotext"), key = $("keystate");
+
+    // Ask needs a key regardless of whether an index exists, so report it either way.
+    var configured = s.api_key && s.api_key !== "not configured";
+    key.textContent = configured ? "key: set" : "key: not set";
+    key.className = configured ? "" : "warn";
+    key.title = configured
+      ? "Ask reads the key from " + s.api_key
+      : "Ask will fail. Set ANTHROPIC_API_KEY, then restart kb serve.";
+
     if (!s.exists) {
       info.textContent = "No index yet — run  kb add <folder>";
       info.removeAttribute("title");

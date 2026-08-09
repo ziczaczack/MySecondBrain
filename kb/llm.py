@@ -62,6 +62,20 @@ class KbLLMError(Exception):
     """
 
 
+def _key_hint() -> str:
+    """How to set the API key, in the shell the user is actually running.
+
+    A bare ``export`` line is useless on Windows, which is where a missing-key
+    message is least helpful if it names the wrong shell.
+    """
+    if os.name == "nt":
+        return (
+            'setx ANTHROPIC_API_KEY "sk-ant-..."   '
+            "(then open a new shell, or restart kb serve)"
+        )
+    return "export ANTHROPIC_API_KEY=sk-ant-..."
+
+
 # ---------------------------------------------------------------------------
 # LLMProvider protocol
 # ---------------------------------------------------------------------------
@@ -125,9 +139,8 @@ class ClaudeProvider:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise KbLLMError(
-                "ANTHROPIC_API_KEY is not set. "
-                "Export it before running kb:\n"
-                "  export ANTHROPIC_API_KEY=sk-ant-..."
+                "ANTHROPIC_API_KEY is not set. Set it before running kb:\n"
+                f"  {_key_hint()}"
             )
         try:
             import anthropic as _anthropic
