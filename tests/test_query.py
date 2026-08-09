@@ -680,3 +680,54 @@ def test_cjk_query_excerpt_is_bounded(tmp_path):
         f"Excerpt length ({len(excerpt)}) equals the whole note ({len(note_text)} chars); "
         "chunking did not produce a bounded passage."
     )
+
+
+def test_query_returns_full_chunk_text_not_just_excerpt(tmp_path, monkeypatch):
+    """query() surfaces the whole retrieved chunk, not only the display excerpt.
+
+    ``kb ask`` synthesizes from what query() hands back. If a result carries
+    only the 240-char excerpt, the model never sees most of the passage that
+    retrieval actually selected.
+
+    The embedding model is stubbed here: what is under test is the metadata a
+    result carries, not the ranking that produced it.
+    """
+    import numpy
+
+    from kb import embedding, store
+
+    # A chunk comfortably past the excerpt cap, with a sentinel only reachable
+    # beyond the cutoff.
+    long_text = ("alpha " * 200) + "OMEGA_SENTINEL"
+    index_dir = str(tmp_path / "idx")
+    store.save(
+        numpy.ones((1, 4), dtype=numpy.float32),
+        [
+            {
+                "key": "/notes/long.md",
+                "path": "/notes/long.md",
+                "filename": "long.md",
+                "chunk_text": long_text,
+                "start_line": 1,
+                "mtime": time.time(),
+                "size": len(long_text),
+                "kind": "note",
+                "change_token": [0, 0],
+                "embed_model": embedding.current_model_name(),
+            }
+        ],
+        index_dir,
+    )
+    monkeypatch.setattr(
+        embedding, "encode_one", lambda text: numpy.ones(4, dtype=numpy.float32)
+    )
+
+    (result,) = query("anything", index_dir=index_dir, k=1)
+
+    assert result["text"] == long_text, (
+        "query() must return the full chunk text so synthesis sees the whole "
+        f"passage; got {result.get('text')!r}"
+    )
+    # The display excerpt keeps its bounded-one-line contract.
+    assert result["excerpt"].endswith("…")
+    assert "OMEGA_SENTINEL" not in result["excerpt"]

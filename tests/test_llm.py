@@ -34,7 +34,7 @@ def test_synthesis_model_default(monkeypatch, tmp_path):
     # Redirect kb_home to an empty dir so no stray config.json interferes.
     monkeypatch.setenv("KB_HOME", str(tmp_path / "kbhome"))
 
-    assert synthesis_model() == "claude-opus-4-8"
+    assert synthesis_model() == "claude-opus-5"
 
 
 def test_synthesis_model_env_override_wins(monkeypatch, tmp_path):
@@ -50,4 +50,4 @@ def test_synthesis_model_empty_env_treated_as_unset(monkeypatch, tmp_path):
     monkeypatch.setenv("KB_HOME", str(tmp_path / "kbhome"))
     monkeypatch.setenv("KB_MODEL", "")
 
-    assert synthesis_model() == "claude-opus-4-8"
+    assert synthesis_model() == "claude-opus-5"

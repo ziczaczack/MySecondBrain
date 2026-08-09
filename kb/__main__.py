@@ -137,6 +137,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the managed index location (advanced).",
     )
 
+    serve_p = sub.add_parser(
+        "serve",
+        help="Serve the web UI: search, ask, and clip from a browser.",
+    )
+    serve_p.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind address (default: 127.0.0.1, this machine only). Use "
+        "0.0.0.0 to reach it from a phone on the same wifi; a token is then "
+        "required and printed with the URL.",
+    )
+    serve_p.add_argument(
+        "--port", type=int, default=None, help="Port to listen on (default: 7777)."
+    )
+    serve_p.add_argument(
+        "--token",
+        default=None,
+        help="Shared token required on every request. Generated automatically "
+        "when binding to a non-local address.",
+    )
+    serve_p.add_argument(
+        "--index-dir",
+        default=None,
+        help="Override the managed index location (advanced).",
+    )
+
     status_p = sub.add_parser("status", help="Show statistics about an existing index.")
     status_p.add_argument(
         "--index-dir",
@@ -324,6 +350,28 @@ def _run_watch(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_serve(args: argparse.Namespace) -> int:
+    from . import serve as serve_mod
+
+    try:
+        serve_mod.serve(
+            index_dir=_resolve_index_dir(args.index_dir),
+            host=args.host,
+            port=args.port or serve_mod.DEFAULT_PORT,
+            token=args.token,
+        )
+    except OSError as err:
+        # Almost always "address already in use" — a second kb serve, or
+        # something else holding the port.
+        print(
+            f"Could not listen on {args.host}:{args.port or serve_mod.DEFAULT_PORT} "
+            f"({err}). Try --port with a different number.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def _highlight(excerpt: str, terms: list[str]) -> str:
     """Wrap each matched term occurrence in ``excerpt`` with markdown bold.
 
@@ -472,6 +520,9 @@ def _run_status(args: argparse.Namespace) -> int:
     print(f"Kinds:           {kinds_str}")
     print(f"Index size:      {_humanize_bytes(st.get('index_bytes', 0))}")
     print(f"Last ingest:     {last}")
+    # Where the synthesis key comes from, never its value. Surfaced here so a
+    # missing key is discoverable without running `kb ask` and watching it fail.
+    print(f"API key:         {config.api_key_source()}")
     return 0
 
 
@@ -508,6 +559,8 @@ def main() -> None:
         sys.exit(_run_sources(args))
     elif args.command == "watch":
         sys.exit(_run_watch(args))
+    elif args.command == "serve":
+        sys.exit(_run_serve(args))
     elif args.command == "status":
         sys.exit(_run_status(args))
     else:  # pragma: no cover - argparse enforces a valid subcommand.

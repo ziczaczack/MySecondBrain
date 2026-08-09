@@ -8,8 +8,8 @@ Protocol quick-reference
 ------------------------
 :class:`LLMProvider`   — backend that turns (system, context, question) → answer.
 :class:`KbLLMError`    — single kb-level error type raised for all provider failures.
-:class:`ClaudeProvider` — Anthropic backend: claude-opus-4-8, adaptive thinking,
-                          streaming + get_final_message().
+:class:`ClaudeProvider` — Anthropic backend: one non-streaming messages.create
+                          against the configured synthesis model.
 
 Adding a new provider (no edits to query.py required)
 ------------------------------------------------------
@@ -62,6 +62,20 @@ class KbLLMError(Exception):
     """
 
 
+def _key_hint() -> str:
+    """How to set the API key, in the shell the user is actually running.
+
+    A bare ``export`` line is useless on Windows, which is where a missing-key
+    message is least helpful if it names the wrong shell.
+    """
+    if os.name == "nt":
+        return (
+            'setx ANTHROPIC_API_KEY "sk-ant-..."   '
+            "(then open a new shell, or restart kb serve)"
+        )
+    return "export ANTHROPIC_API_KEY=sk-ant-..."
+
+
 # ---------------------------------------------------------------------------
 # LLMProvider protocol
 # ---------------------------------------------------------------------------
@@ -101,9 +115,10 @@ class ClaudeProvider:
     ``anthropic`` package is not installed — so callers learn of
     misconfiguration before issuing any query.
 
-    Every API call uses ``messages.create`` (non-streaming) with a 60-second
+    Every API call uses ``messages.create`` (non-streaming) with a bounded
     client timeout, so the call can never hang indefinitely.  Only ``text``
-    content blocks are returned to the caller.
+    content blocks are returned to the caller -- on models that think, the
+    thinking blocks are simply skipped.
 
     All SDK exceptions (:class:`~anthropic.APIStatusError`,
     :class:`~anthropic.APIConnectionError`, and the base
@@ -111,16 +126,21 @@ class ClaudeProvider:
     :class:`KbLLMError`.
     """
 
-    _MAX_TOKENS = 4_096
+    # A ceiling, not a spend: we are billed for what is generated. It has to
+    # cover thinking as well as the answer -- current models think by default,
+    # and a cap sized for the answer alone truncates mid-sentence.
+    _MAX_TOKENS = 16_000
+    # Generous enough for a thinking model, short enough to fail rather than
+    # hang if the API stalls.
+    _TIMEOUT_SECONDS = 120.0
 
     def __init__(self) -> None:
         self._model = synthesis_model()
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise KbLLMError(
-                "ANTHROPIC_API_KEY is not set. "
-                "Export it before running kb:\n"
-                "  export ANTHROPIC_API_KEY=sk-ant-..."
+                "ANTHROPIC_API_KEY is not set. Set it before running kb:\n"
+                f"  {_key_hint()}"
             )
         try:
             import anthropic as _anthropic
@@ -130,7 +150,9 @@ class ClaudeProvider:
                 "Run: pip install anthropic"
             ) from exc
 
-        self._client = _anthropic.Anthropic(api_key=api_key, timeout=60.0)
+        self._client = _anthropic.Anthropic(
+            api_key=api_key, timeout=self._TIMEOUT_SECONDS
+        )
         self._anthropic = _anthropic
 
     def complete(self, system: str, context: str, question: str) -> str:
@@ -143,21 +165,15 @@ class ClaudeProvider:
         """
         user_content = f"{context}\n\n{question}" if context.strip() else question
 
-        # Wrap the system string in a content-block list so Anthropic's prompt
-        # cache can store the encoded representation after the first request.
-        system_param = [
-            {
-                "type": "text",
-                "text": system,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-
+        # No cache_control here: the system prompt is ~90 tokens and the
+        # minimum cacheable prefix is 512, so a breakpoint would silently never
+        # fire. The retrieved passages change every question, so there is no
+        # stable prefix worth caching either.
         try:
             message = self._client.messages.create(
                 model=self._model,
                 max_tokens=self._MAX_TOKENS,
-                system=system_param,
+                system=system,
                 messages=[{"role": "user", "content": user_content}],
             )
         except self._anthropic.APIStatusError as exc:

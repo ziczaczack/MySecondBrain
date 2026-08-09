@@ -47,7 +47,7 @@ Model resolution (queryable, never side-effecting)
 1. ``$KB_MODEL`` if set and non-empty.
 2. ``"model"`` key in ``<kb_home>/config.json`` if the file exists and is valid
    JSON (other keys in that file are ignored).
-3. Built-in default: ``"claude-opus-4-8"``.
+3. Built-in default: ``"claude-opus-5"``.
 
 API key handling
 ----------------
@@ -69,7 +69,7 @@ from typing import Optional
 _VALID_KINDS = {"files", "bookmarks", "inbox"}
 
 # Built-in default synthesis model.  Overridable via $KB_MODEL or config.json.
-_DEFAULT_MODEL = "claude-opus-4-8"
+_DEFAULT_MODEL = "claude-opus-5"
 
 # Environment variable and config-file key checked for API key presence.
 _API_KEY_ENV = "ANTHROPIC_API_KEY"
@@ -118,7 +118,7 @@ def synthesis_model() -> str:
 
     1. ``$KB_MODEL`` env var if set and non-empty.
     2. ``"model"`` key in ``<kb_home>/config.json`` if readable and valid JSON.
-    3. Built-in default ``"claude-opus-4-8"``.
+    3. Built-in default ``"claude-opus-5"``.
     """
     env_val = os.environ.get("KB_MODEL")
     if env_val:

@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>kb</title>
+<style>
+  :root {
+    --bg: #fbfaf8;  --panel: #ffffff;  --line: #e4e0d9;
+    --ink: #1c1a17;  --muted: #6d675e;  --accent: #9a5b34;
+    --accent-soft: #f2e7de;  --shadow: 0 1px 2px rgba(28,26,23,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161513;  --panel: #201e1b;  --line: #322f2a;
+      --ink: #ece8e1;  --muted: #9b948a;  --accent: #d08a5c;
+      --accent-soft: #2e2620;  --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 1.25rem 1rem 4rem; }
+
+  header { display: flex; align-items: center; gap: .85rem; margin-bottom: 1rem; }
+  .mark { font-weight: 650; letter-spacing: .04em; font-size: 1.05rem; }
+  .modes { display: flex; gap: .15rem; margin-left: auto;
+           background: var(--panel); border: 1px solid var(--line);
+           border-radius: .6rem; padding: .15rem; }
+  .modes button {
+    font: inherit; font-size: .82rem; border: 0; background: none; cursor: pointer;
+    color: var(--muted); padding: .3rem .7rem; border-radius: .45rem;
+  }
+  .modes button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+  form { display: flex; gap: .5rem; }
+  input[type=text] {
+    flex: 1; min-width: 0; font: inherit; font-size: 1rem;
+    padding: .7rem .85rem; border-radius: .6rem;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    box-shadow: var(--shadow);
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .go {
+    font: inherit; font-weight: 600; cursor: pointer; padding: .7rem 1.1rem;
+    border-radius: .6rem; border: 1px solid var(--accent);
+    background: var(--accent); color: var(--bg);
+  }
+  .go[hidden] { display: none; }
+  .opts { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+          margin: .6rem .1rem 0; font-size: .8rem; color: var(--muted); }
+  .opts label { display: flex; align-items: center; gap: .35rem; cursor: pointer; }
+
+  .status { margin: 1.4rem .1rem; color: var(--muted); font-size: .9rem; }
+  .status.err { color: var(--accent); }
+
+  .answer {
+    margin-top: 1.4rem; padding: 1rem 1.1rem; border-radius: .7rem;
+    background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .cites { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--line);
+           font-size: .85rem; }
+  .cites div { margin-top: .3rem; color: var(--muted); }
+  .cites a { color: var(--accent); text-decoration: none; }
+
+  ol.hits { list-style: none; margin: 1.2rem 0 0; padding: 0; }
+  ol.hits li {
+    padding: .85rem 0; border-top: 1px solid var(--line);
+  }
+  ol.hits li:first-child { border-top: 0; }
+  .meta { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap;
+          font-size: .82rem; margin-bottom: .3rem; }
+  .meta a { color: var(--ink); font-weight: 600; text-decoration: none;
+            overflow-wrap: anywhere; }
+  .meta a:hover { color: var(--accent); }
+  .badge { color: var(--accent); background: var(--accent-soft);
+           border-radius: .3rem; padding: .05rem .4rem; font-size: .72rem; }
+  .dim { color: var(--muted); }
+  .snippet { color: var(--muted); overflow-wrap: anywhere; }
+  .snippet b { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 2.5rem; padding-top: .8rem; border-top: 1px solid var(--line);
+    display: flex; gap: .75rem; align-items: center; flex-wrap: wrap;
+    font-size: .78rem; color: var(--muted);
+  }
+  #infotext { overflow-wrap: anywhere; }
+  #keystate.warn { color: var(--accent); }
+  footer button {
+    font: inherit; cursor: pointer; margin-left: auto; white-space: nowrap;
+    color: var(--muted); background: none;
+    border: 1px solid var(--line); border-radius: .4rem; padding: .2rem .55rem;
+  }
+  footer button:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+  footer button:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="mark">kb</span>
+    <div class="modes" role="group" aria-label="Mode">
+      <button type="button" data-mode="search" aria-pressed="true">Search</button>
+      <button type="button" data-mode="ask" aria-pressed="false">Ask</button>
+      <button type="button" data-mode="clip" aria-pressed="false">Clip</button>
+    </div>
+  </header>
+
+  <form id="f" autocomplete="off">
+    <input id="q" type="text" placeholder="Search your notes" autofocus
+           enterkeyhint="search" spellcheck="false">
+    <button class="go" id="go" type="submit" hidden>Go</button>
+  </form>
+
+  <div class="opts" id="opts">
+    <label><input type="checkbox" id="hybrid"> keyword boost</label>
+    <label>show
+      <select id="k">
+        <option>5</option><option>10</option><option>20</option>
+      </select>
+    </label>
+    <label>only
+      <select id="kind">
+        <option value="">everything</option>
+        <option value="note">notes</option>
+        <option value="code">code</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div id="out"></div>
+
+  <footer>
+    <span id="infotext">…</span>
+    <span id="keystate"></span>
+    <button type="button" id="reindex" title="Re-scan every registered folder for changes">reindex</button>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var TOKEN = new URLSearchParams(location.search).get("t") || "";
+  var mode = "search";
+  var seq = 0;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var q = $("q"), out = $("out"), status = $("status"), opts = $("opts"), go = $("go");
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function withToken(path) {
+    if (!TOKEN) { return path; }
+    return path + (path.indexOf("?") === -1 ? "?" : "&") + "t=" + encodeURIComponent(TOKEN);
+  }
+
+  function api(path, body) {
+    var init = body
+      ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      : {};
+    return fetch(withToken(path), init).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) { throw new Error(data.error || ("Request failed (" + r.status + ")")); }
+        return data;
+      });
+    });
+  }
+
+  function say(text, isError) {
+    status.textContent = text || "";
+    status.className = "status" + (isError ? " err" : "");
+  }
+
+  // Bold the query terms the backend says it matched, on escaped text only.
+  function highlight(text, terms) {
+    var html = esc(text);
+    (terms || []).forEach(function (t) {
+      if (!t) { return; }
+      var pattern = esc(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      html = html.replace(new RegExp(pattern, "gi"), function (m) { return "<b>" + m + "</b>"; });
+    });
+    return html;
+  }
+
+  function noteLink(r) {
+    var label = esc(r.filename) + ":" + esc(r.start_line);
+    if (!r.path) { return "<span>" + label + "</span>"; }
+    return '<a href="obsidian://open?path=' + encodeURIComponent(r.path) +
+           '" title="' + esc(r.path) + '">' + label + "</a>";
+  }
+
+  function renderHits(results) {
+    if (!results.length) { out.innerHTML = ""; say("Nothing matched."); return; }
+    say("");
+    out.innerHTML = "<ol class=hits>" + results.map(function (r) {
+      return "<li><div class=meta>" + noteLink(r) +
+             '<span class="badge">' + esc(r.kind || "note") + "</span>" +
+             '<span class="dim">' + esc(r.date || "") + "</span></div>" +
+             '<div class="snippet">' + highlight(r.excerpt, r.matched_terms) + "</div></li>";
+    }).join("") + "</ol>";
+  }
+
+  function renderAnswer(data) {
+    say("");
+    var html = '<div class="answer">' + esc(data.answer);
+    if (data.citations && data.citations.length) {
+      html += '<div class="cites"><strong>Sources</strong>';
+      data.citations.forEach(function (c) {
+        html += "<div>[" + esc(c.n) + "] " + noteLink(c) + "</div>";
+      });
+      html += "</div>";
+    }
+    out.innerHTML = html + "</div>";
+  }
+
+  function options() {
+    return {
+      k: parseInt($("k").value, 10) || 5,
+      kind: $("kind").value || null,
+      hybrid: $("hybrid").checked
+    };
+  }
+
+  function runSearch() {
+    var text = q.value.trim(), mine = ++seq;
+    if (!text) { out.innerHTML = ""; say(""); return; }
+    var o = options();
+    var url = "/api/search?q=" + encodeURIComponent(text) +
+              "&k=" + o.k + "&hybrid=" + (o.hybrid ? "1" : "0") +
+              (o.kind ? "&kind=" + o.kind : "");
+    api(url)
+      .then(function (d) { if (mine === seq) { renderHits(d.results); } })
+      .catch(function (e) { if (mine === seq) { out.innerHTML = ""; say(e.message, true); } });
+  }
+
+  function runAsk() {
+    var text = q.value.trim();
+    if (!text) { return; }
+    var mine = ++seq, o = options();
+    out.innerHTML = "";
+    say("Thinking…");
+    api("/api/ask", { question: text, k: o.k, kind: o.kind, hybrid: o.hybrid })
+      .then(function (d) { if (mine === seq) { renderAnswer(d); } })
+      .catch(function (e) { if (mine === seq) { say(e.message, true); } });
+  }
+
+  function runClip() {
+    var url = q.value.trim(), mine = ++seq;
+    if (!/^https?:\/\/\S+$/i.test(url)) { say("Paste a link to clip.", true); return; }
+    out.innerHTML = "";
+    say("Fetching…");
+    api("/api/clip", { url: url })
+      .then(function (d) {
+        if (mine !== seq) { return; }
+        say(d.duplicate ? "Already clipped: " + (d.title || url)
+                        : "Clipped — " + (d.title || d.path));
+        if (!d.duplicate) { q.value = ""; }
+      })
+      .catch(function (e) { if (mine === seq) { say(e.message, true); } });
+  }
+
+  // Footer: what is actually being searched, and a way to refresh it.
+  function renderStatus(s) {
+    var info = $("infotext"), key = $("keystate");
+
+    // Ask needs a key regardless of whether an index exists, so report it either way.
+    var configured = s.api_key && s.api_key !== "not configured";
+    key.textContent = configured ? "key: set" : "key: not set";
+    key.className = configured ? "" : "warn";
+    key.title = configured
+      ? "Ask reads the key from " + s.api_key
+      : "Ask will fail. Set ANTHROPIC_API_KEY, then restart kb serve.";
+
+    if (!s.exists) {
+      info.textContent = "No index yet — run  kb add <folder>";
+      info.removeAttribute("title");
+      return;
+    }
+    var parts = (s.sources || []).map(function (x) { return x.path; });
+    parts.push(s.files + (s.files === 1 ? " file" : " files"));
+    parts.push(s.chunks + (s.chunks === 1 ? " chunk" : " chunks"));
+    if (s.last_ingest_date) { parts.push("indexed " + s.last_ingest_date); }
+    info.textContent = parts.join("  ·  ");
+    var detail = "index: " + s.index_dir;
+    if (s.clips_dir) { detail += "\nclips: " + s.clips_dir; }
+    info.title = detail;
+  }
+
+  function loadStatus() {
+    api("/api/status")
+      .then(renderStatus)
+      .catch(function (e) { $("infotext").textContent = e.message; });
+  }
+
+  $("reindex").addEventListener("click", function () {
+    var btn = this, label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "reindexing…";
+    api("/api/reindex", {})
+      .then(function (d) {
+        var msg = "Reindexed " + d.folders + (d.folders === 1 ? " folder." : " folders.");
+        if (d.failed && d.failed.length) {
+          msg += " Could not read: " + d.failed.map(function (f) { return f.path; }).join(", ");
+        }
+        say(msg, !!(d.failed && d.failed.length));
+        loadStatus();
+        if (mode === "search") { runSearch(); }
+      })
+      .catch(function (e) { say(e.message, true); })
+      .then(function () { btn.disabled = false; btn.textContent = label; });
+  });
+
+  var debounce;
+  q.addEventListener("input", function () {
+    if (mode !== "search") { return; }
+    clearTimeout(debounce);
+    debounce = setTimeout(runSearch, 180);
+  });
+
+  $("f").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (mode === "search") { runSearch(); }
+    else if (mode === "ask") { runAsk(); }
+    else { runClip(); }
+  });
+
+  [$("k"), $("kind"), $("hybrid")].forEach(function (el) {
+    el.addEventListener("change", function () { if (mode === "search") { runSearch(); } });
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll(".modes button"), function (b) {
+    b.addEventListener("click", function () {
+      mode = b.dataset.mode;
+      Array.prototype.forEach.call(document.querySelectorAll(".modes button"), function (o) {
+        o.setAttribute("aria-pressed", String(o === b));
+      });
+      q.placeholder = mode === "search" ? "Search your notes"
+                    : mode === "ask" ? "Ask a question about your notes"
+                    : "Paste a link to save into your vault";
+      q.setAttribute("enterkeyhint", mode === "search" ? "search" : "go");
+      go.hidden = (mode === "search");
+      opts.style.display = (mode === "clip") ? "none" : "";
+      out.innerHTML = "";
+      say("");
+      q.focus();
+    });
+  });
+
+  loadStatus();
+})();
+</script>
+</body>
+</html>

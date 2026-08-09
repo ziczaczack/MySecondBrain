@@ -202,3 +202,22 @@ def test_default_provider_is_claude_when_none(monkeypatch):
 
     assert constructed["count"] == 1, "answer() should construct ClaudeProvider once when provider=None"
     assert result["answer"] == "STUBBED CLAUDE ANSWER"
+
+
+def test_context_uses_full_chunk_text_not_truncated_excerpt(monkeypatch):
+    """The provider receives the whole retrieved passage, not the display excerpt."""
+    long_text = ("alpha " * 200) + "OMEGA_SENTINEL"
+    truncated = long_text[:240].rstrip() + "…"
+    _patch_query(
+        monkeypatch,
+        [_chunk("long.md", "/notes/long.md", 1, truncated, text=long_text)],
+    )
+    fake = FakeProvider()
+
+    answer("q", provider=fake)
+
+    context = fake.calls[0]["context"]
+    assert "OMEGA_SENTINEL" in context, (
+        "answer() sent the truncated excerpt; the model never sees the rest of "
+        f"the retrieved passage: {context!r}"
+    )
