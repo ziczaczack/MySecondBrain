@@ -74,7 +74,15 @@ def extract_article(html: str, url: str = "") -> Optional[tuple]:
     except ImportError:
         return None
     try:
-        text = trafilatura.extract(html, url=url or None, include_comments=False)
+        # Markdown, not plain text: the default output drops heading markers
+        # and renumbers <ol> items as bullets, which costs a clip its outline
+        # in Obsidian and, in a how-to, the order of the steps.
+        text = trafilatura.extract(
+            html,
+            url=url or None,
+            include_comments=False,
+            output_format="markdown",
+        )
     except Exception:
         return None
     if not text or not text.strip():

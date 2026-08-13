@@ -31,6 +31,35 @@ when modelling soft-deleted records.</p>
 </body></html>"""
 
 
+# Same shape as ARTICLE_HTML but with the structure that plain-text extraction
+# destroys: a section heading and an ordered list whose numbering carries meaning.
+STRUCTURED_HTML = """<!DOCTYPE html>
+<html><head><title>Deploying With Zero Downtime</title></head>
+<body>
+<nav><a href="/">Home</a></nav>
+<article>
+<h1>Deploying With Zero Downtime</h1>
+<p>Rolling deploys keep a service available while its code changes underneath,
+by replacing instances a few at a time instead of all at once. This paragraph
+exists to give the extractor a substantial block of prose to recognise as main
+content rather than boilerplate navigation.</p>
+<p>The tricky part is not the rollout itself but the database, because old and
+new code run simultaneously against one schema. Every migration therefore has
+to be compatible with the version of the code that is about to be replaced as
+well as the one replacing it.</p>
+<h2>Migration Order</h2>
+<p>The steps have to happen in this order:</p>
+<ol>
+<li><strong>Add the new column</strong> as nullable, so existing writes keep working.</li>
+<li><strong>Backfill</strong> it in batches, so the table is never locked for long.</li>
+<li><strong>Start writing</strong> both columns from the new code path.</li>
+<li><strong>Drop the old column</strong> only once no running code reads it.</li>
+</ol>
+</article>
+<footer>Copyright 2026</footer>
+</body></html>"""
+
+
 def test_youtube_video_id_matches_watch_and_short_urls():
     assert fetch.youtube_video_id(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -58,6 +87,31 @@ def test_extract_article_returns_title_and_text():
     assert "unshipped orders" in text
     # Boilerplate must not leak into the extracted text.
     assert "Copyright" not in text
+
+
+def test_extract_article_keeps_headings_as_markdown():
+    # Section headings are what make a long clip navigable in Obsidian: the
+    # outline pane, folding, and [[note#heading]] links all key off them.
+    pytest.importorskip("trafilatura")
+    result = fetch.extract_article(STRUCTURED_HTML)
+    assert result is not None
+    _, text = result
+    heading = [ln for ln in text.splitlines() if ln.lstrip().startswith("#")]
+    assert any("Migration Order" in ln for ln in heading), (
+        f"no markdown heading for the <h2>; got headings {heading!r}"
+    )
+
+
+def test_extract_article_keeps_ordered_lists_numbered():
+    # An <ol> flattened to bullets loses the sequence, and in a migration or a
+    # how-to the sequence *is* the content.
+    pytest.importorskip("trafilatura")
+    result = fetch.extract_article(STRUCTURED_HTML)
+    assert result is not None
+    _, text = result
+    assert "1." in text and "4." in text, (
+        "ordered list lost its numbering (flattened to bullets?)"
+    )
 
 
 def test_extract_article_rejects_empty_html():

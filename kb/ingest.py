@@ -32,35 +32,113 @@ _CJK_CHARS = (
 # one token (identical to the previous \S+ behaviour for pure-ASCII text).
 _WORD_RE = re.compile(rf"[{_CJK_CHARS}]|[^\s{_CJK_CHARS}]+")
 
+# How far back from a nominal window edge we will look for a clean break before
+# giving up and cutting where the word count says.
+_SNAP_LOOKBACK = 30
+
+# Trailing markup to ignore when deciding whether a token closes a sentence, so
+# that "seven words.**" and 'the end."' still count.
+_TRAILING_MARKUP = "\"')]}*_`”’"
+
+# An ordered-list marker ("2." or "2)") ends in a period but opens an item
+# rather than closing a sentence. Snapping there would strand the number from
+# the text it numbers.
+_LIST_MARKER_RE = re.compile(r"\A\d+[.)]\Z")
+
+
+def _body_offset(content: str) -> int:
+    """Char offset where prose begins, skipping any leading YAML frontmatter.
+
+    Frontmatter is identity, not content: embedding ``url`` and
+    ``kb-clipped: true`` spends window on every clip and turns those keys into
+    terms that match every clipped note.
+
+    Returns 0 when the document does not open with a *closed* frontmatter
+    block, so a leading ``---`` used as a thematic break keeps its content.
+    """
+    first_nl = content.find("\n")
+    if first_nl == -1 or content[:first_nl].strip() != "---":
+        return 0
+    pos = first_nl + 1
+    while pos < len(content):
+        nl = content.find("\n", pos)
+        line_end = len(content) if nl == -1 else nl
+        if content[pos:line_end].strip() in ("---", "..."):
+            return len(content) if nl == -1 else nl + 1
+        pos = line_end + 1
+    # Never closed, so this was not frontmatter after all.
+    return 0
+
+
+def _ends_sentence(token: str) -> bool:
+    """True when *token* is the last word of a sentence."""
+    if _LIST_MARKER_RE.match(token):
+        return False
+    return token.rstrip(_TRAILING_MARKUP).endswith(
+        (".", "!", "?", "。", "！", "？", "…")
+    )
+
+
+def _snap_end(
+    content: str, spans: list[tuple[int, int]], start: int, nominal: int
+) -> int:
+    """Pull a window's exclusive end back to the nearest clean break.
+
+    Looks backward from *nominal* for a line break or a sentence ending, within
+    :data:`_SNAP_LOOKBACK` words. Falls back to *nominal* when the text offers
+    no boundary — long unbroken prose still gets chunked.
+    """
+    floor = max(start + 1, nominal - _SNAP_LOOKBACK)
+    for end in range(nominal, floor - 1, -1):
+        last_start, last_end = spans[end - 1]
+        # A newline before the next word ends a line, list item, or paragraph.
+        if "\n" in content[last_end : spans[end][0]]:
+            return end
+        if _ends_sentence(content[last_start:last_end]):
+            return end
+    return nominal
+
 
 def _chunk_document(content: str) -> list[tuple[str, int]]:
     """Split ``content`` into overlapping word-windows.
 
     Returns a list of ``(chunk_text, start_line)`` tuples. ``chunk_text`` is
     sliced from the original string (formatting preserved); ``start_line`` is
-    the 1-based line number where the chunk begins. A document shorter than one
-    window yields a single chunk covering all of it.
+    the 1-based line number where the chunk begins, counted in the *whole*
+    document so citations survive the frontmatter skip. A document shorter than
+    one window yields a single chunk covering all of it.
+
+    Windows end on a sentence or line boundary where one is close by: a chunk
+    cut mid-sentence splits a term from the text defining it, which costs the
+    answer layer its ability to cite either one precisely.
     """
-    spans = [(m.start(), m.end()) for m in _WORD_RE.finditer(content)]
+    offset = _body_offset(content)
+    spans = [
+        (m.start(), m.end())
+        for m in _WORD_RE.finditer(content)
+        if m.start() >= offset
+    ]
     if not spans:
         return []
 
-    step = max(_CHUNK_WORDS - _CHUNK_OVERLAP, 1)
     chunks: list[tuple[str, int]] = []
     n = len(spans)
     i = 0
     while i < n:
-        window = spans[i : i + _CHUNK_WORDS]
-        start_char = window[0][0]
-        end_char = window[-1][1]
+        nominal = i + _CHUNK_WORDS
+        # The final window reaches the end; no snapping and no tiny duplicate tail.
+        end = n if nominal >= n else _snap_end(content, spans, i, nominal)
+
+        start_char = spans[i][0]
+        end_char = spans[end - 1][1]
         chunk_text = content[start_char:end_char]
         start_line = content.count("\n", 0, start_char) + 1
         chunks.append((chunk_text, start_line))
 
-        # The final window reaches the end; stop to avoid a tiny duplicate tail.
-        if i + _CHUNK_WORDS >= n:
+        if end >= n:
             break
-        i += step
+        # Overlap is measured back from where this chunk actually ended.
+        i = max(end - _CHUNK_OVERLAP, i + 1)
 
     return chunks
 
